@@ -50,6 +50,7 @@ const fs   = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
+const os = require('os');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
@@ -64,6 +65,9 @@ const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname,
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
 const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || path.join(__dirname, 'tmp', 'beatmaps');
+const MEDIA_CACHE_ROOT = process.env.MINERADIO_MEDIA_CACHE_DIR || path.join(process.env.APPDATA || process.env.LOCALAPPDATA || os.homedir(), 'Mineradio', 'media-cache');
+const MEDIA_CACHE_JSON_DIR = path.join(MEDIA_CACHE_ROOT, 'json');
+const MEDIA_CACHE_IMAGE_DIR = path.join(MEDIA_CACHE_ROOT, 'images');
 const APP_PACKAGE = readPackageInfo();
 const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
@@ -245,6 +249,79 @@ function sendJSON(res, data, status) {
     'Expires': '0',
   });
   res.end(JSON.stringify(data));
+}
+function mediaCacheHash(key) {
+  return crypto.createHash('sha1').update(String(key || '')).digest('hex');
+}
+function ensureMediaCacheDir(dir) {
+  fs.mkdirSync(dir || MEDIA_CACHE_ROOT, { recursive: true });
+}
+function mediaCacheJsonPath(namespace, key) {
+  return path.join(MEDIA_CACHE_JSON_DIR, String(namespace || 'misc') + '-' + mediaCacheHash(key) + '.json');
+}
+function mediaCacheImagePath(namespace, key) {
+  return path.join(MEDIA_CACHE_IMAGE_DIR, String(namespace || 'image') + '-' + mediaCacheHash(key) + '.bin');
+}
+function readMediaCacheJson(namespace, key) {
+  try {
+    const file = mediaCacheJsonPath(namespace, key);
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+function writeMediaCacheJson(namespace, key, value) {
+  try {
+    ensureMediaCacheDir(MEDIA_CACHE_JSON_DIR);
+    fs.writeFileSync(mediaCacheJsonPath(namespace, key), JSON.stringify({ value, savedAt: Date.now() }));
+  } catch (e) {
+    console.warn('[MediaCache] json write failed:', e.message);
+  }
+}
+function readMediaCacheImage(namespace, key) {
+  try {
+    const file = mediaCacheImagePath(namespace, key);
+    if (!fs.existsSync(file)) return null;
+    const meta = readMediaCacheJson(namespace + '-meta', key) || {};
+    return { buffer: fs.readFileSync(file), contentType: meta.value && meta.value.contentType || 'image/jpeg' };
+  } catch (e) {
+    return null;
+  }
+}
+function writeMediaCacheImage(namespace, key, buffer, contentType) {
+  try {
+    if (!buffer || !buffer.length) return;
+    ensureMediaCacheDir(MEDIA_CACHE_IMAGE_DIR);
+    fs.writeFileSync(mediaCacheImagePath(namespace, key), buffer);
+    writeMediaCacheJson(namespace + '-meta', key, { contentType: contentType || 'image/jpeg', size: buffer.length });
+  } catch (e) {
+    console.warn('[MediaCache] image write failed:', e.message);
+  }
+}
+function mediaCacheStats() {
+  let size = 0;
+  let files = 0;
+  function walk(dir) {
+    if (!fs.existsSync(dir)) return;
+    fs.readdirSync(dir, { withFileTypes: true }).forEach(entry => {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else if (entry.isFile()) {
+        const st = fs.statSync(p);
+        size += st.size;
+        files++;
+      }
+    });
+  }
+  try { walk(MEDIA_CACHE_ROOT); } catch (e) {}
+  return { size, files, dir: MEDIA_CACHE_ROOT };
+}
+function clearMediaCache() {
+  try { fs.rmSync(MEDIA_CACHE_ROOT, { recursive: true, force: true }); } catch (e) {}
+  externalSongCoverCache.clear();
+  lrclibCache.clear();
+  return mediaCacheStats();
 }
 function readPackageInfo() {
   try {
@@ -1877,7 +1954,14 @@ function navidromeUrl(endpoint, params) {
   const u = new URL(cfg.serverUrl + '/rest/' + cleanEndpoint);
   const all = Object.assign({}, navidromeAuthParams(cfg), params || {});
   Object.keys(all).forEach(key => {
-    if (all[key] !== null && all[key] !== undefined && String(all[key]) !== '') u.searchParams.set(key, String(all[key]));
+    const value = all[key];
+    if (Array.isArray(value)) {
+      value.forEach(item => {
+        if (item !== null && item !== undefined && String(item) !== '') u.searchParams.append(key, String(item));
+      });
+      return;
+    }
+    if (value !== null && value !== undefined && String(value) !== '') u.searchParams.set(key, String(value));
   });
   return u.toString();
 }
@@ -2037,15 +2121,49 @@ async function handleNavidromeSearch(keywords, limit) {
   return navidromeArray(result.song).map(mapNavidromeSong).filter(song => song.id && song.name);
 }
 async function handleNavidromePlaylists() {
-  const [albums, virtuals, body] = await Promise.all([
-    handleNavidromeAlbums(),
+  const [virtuals, body] = await Promise.all([
     navidromeVirtualPlaylists(),
     navidromeApi('getPlaylists.view', {}),
   ]);
   const list = navidromeArray(body.playlists && body.playlists.playlist)
     .map(mapNavidromePlaylist)
     .filter(pl => pl.id && pl.name);
-  return albums.concat(virtuals, list);
+  return virtuals.concat(list);
+}
+async function handleNavidromeAddSongsToPlaylist(playlistId, songIds) {
+  playlistId = String(playlistId || '').trim();
+  const ids = navidromeArray(songIds)
+    .flatMap(id => String(id || '').split(','))
+    .map(id => id.trim())
+    .filter(Boolean);
+  if (!playlistId || !ids.length) throw new Error('MISSING_PLAYLIST_OR_SONG');
+  if (playlistId.startsWith('virtual:') || playlistId.startsWith('album:')) throw new Error('PLAYLIST_NOT_WRITABLE');
+  const body = await navidromeApi('getPlaylist.view', { id: playlistId });
+  const playlist = body.playlist || {};
+  const existingIds = navidromeArray(playlist.entry || playlist.song)
+    .map(song => String(song.id || song.songId || '').trim())
+    .filter(Boolean);
+  const seen = new Set(existingIds);
+  const added = [];
+  ids.forEach(id => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    added.push(id);
+  });
+  if (added.length) {
+    await navidromeApi('updatePlaylist.view', {
+      playlistId,
+      name: playlist.name || undefined,
+      songIdToAdd: added,
+    }, { timeoutMs: 20000 });
+  }
+  return {
+    success: true,
+    playlistId,
+    requested: ids.length,
+    added: added.length,
+    duplicate: ids.length - added.length,
+  };
 }
 async function navidromeSongsFromAlbums(albums, maxSongs) {
   const out = [];
@@ -2108,12 +2226,15 @@ async function handleNavidromeArtistDetail(id, name, limit) {
   }
   const artistName = (artistRaw && artistRaw.name) || name || '';
   const albums = albumsRaw.map(mapNavidromeAlbum).filter(album => album.albumId && album.name);
-  const avatarId = artistRaw && (artistRaw.coverArt || artistRaw.artistImageUrl || (albumsRaw[0] && (albumsRaw[0].coverArt || albumsRaw[0].id)));
+  const navidromeArtistImage = artistRaw && (artistRaw.coverArt || artistRaw.artistImageUrl);
+  const albumAvatarId = albumsRaw[0] && (albumsRaw[0].coverArt || albumsRaw[0].id);
+  const externalArtistAvatar = navidromeArtistImage ? '' : await fetchExternalArtistImage(artistName);
+  const avatarId = navidromeArtistImage || (externalArtistAvatar ? ('/api/external/artist-image?name=' + encodeURIComponent(artistName)) : albumAvatarId);
   return {
     artist: {
       id: id || (artistRaw && artistRaw.id) || '',
       name: artistName || '未知歌手',
-      avatar: avatarId && !/^https?:\/\//i.test(String(avatarId)) ? navidromeCoverUrl(avatarId) : (artistRaw && artistRaw.artistImageUrl || ''),
+      avatar: avatarId && !/^https?:\/\//i.test(String(avatarId)) && !String(avatarId).startsWith('/api/') ? navidromeCoverUrl(avatarId) : (avatarId || ''),
       albumCount: albums.length,
       songCount: Number(artistRaw && artistRaw.songCount || 0) || 0,
     },
@@ -2260,6 +2381,9 @@ function externalCoverCacheKey(meta) {
     .map(value => String(value || '').trim().toLowerCase())
     .join('|');
 }
+function externalArtistCacheKey(name) {
+  return String(name || '').trim().toLowerCase();
+}
 function pruneExternalSongCoverCache() {
   if (externalSongCoverCache.size <= 480) return;
   const keys = Array.from(externalSongCoverCache.keys());
@@ -2328,6 +2452,28 @@ async function fetchDeezerSongCover(meta) {
   if (!best || best.score < 8) return null;
   return best.item.album.cover_xl || best.item.album.cover_big || best.item.album.cover_medium || null;
 }
+async function fetchExternalArtistImage(name) {
+  name = String(name || '').trim();
+  if (!name) return null;
+  const cacheKey = externalArtistCacheKey(name);
+  const diskCached = readMediaCacheJson('external-artist-image-url', cacheKey);
+  if (diskCached && Object.prototype.hasOwnProperty.call(diskCached, 'value')) return diskCached.value || null;
+  let found = null;
+  try {
+    const u = new URL('https://api.deezer.com/search/artist');
+    u.searchParams.set('q', name);
+    u.searchParams.set('limit', '6');
+    const body = await requestJson(u.toString(), { headers: { 'User-Agent': UA }, timeoutMs: 2800 });
+    const list = Array.isArray(body && body.data) ? body.data : [];
+    const exact = list.find(item => compactMetaText(item && item.name) === compactMetaText(name));
+    const picked = exact || list[0];
+    found = picked && (picked.picture_xl || picked.picture_big || picked.picture_medium) || null;
+  } catch (err) {
+    console.warn('[ExternalArtistImage] lookup failed:', err.message || err);
+  }
+  writeMediaCacheJson('external-artist-image-url', cacheKey, found || null);
+  return found || null;
+}
 async function fetchExternalSongCover(meta) {
   meta = {
     title: String(meta && meta.title || '').trim(),
@@ -2338,6 +2484,11 @@ async function fetchExternalSongCover(meta) {
   if (!meta.title || !meta.artist) return null;
   const cacheKey = externalCoverCacheKey(meta);
   if (externalSongCoverCache.has(cacheKey)) return externalSongCoverCache.get(cacheKey);
+  const diskCached = readMediaCacheJson('external-cover-url', cacheKey);
+  if (diskCached && diskCached.value) {
+    externalSongCoverCache.set(cacheKey, diskCached.value);
+    return diskCached.value;
+  }
   let found = null;
   try {
     found = await fetchItunesSongCover(meta);
@@ -2352,7 +2503,7 @@ async function fetchExternalSongCover(meta) {
     }
   }
   externalSongCoverCache.set(cacheKey, found || null);
-  pruneExternalSongCoverCache();
+  if (found) writeMediaCacheJson('external-cover-url', cacheKey, found);
   return found || null;
 }
 function lrclibCacheKey(meta) {
@@ -2384,6 +2535,11 @@ async function fetchLrclibLyrics(meta) {
   if (!meta.trackName || !meta.artistName) return null;
   const cacheKey = lrclibCacheKey(meta);
   if (lrclibCache.has(cacheKey)) return lrclibCache.get(cacheKey);
+  const diskCached = readMediaCacheJson('lrclib-lyrics', cacheKey);
+  if (diskCached && Object.prototype.hasOwnProperty.call(diskCached, 'value')) {
+    lrclibCache.set(cacheKey, diskCached.value || null);
+    return diskCached.value || null;
+  }
   const headers = { 'User-Agent': 'Mineradio/1.1.1 (https://github.com/XxHuberrr/Mineradio)' };
   function buildUrl(path, params) {
     const u = new URL('https://lrclib.net' + path);
@@ -2432,15 +2588,14 @@ async function fetchLrclibLyrics(meta) {
     trackId: picked.id || '',
   } : null;
   lrclibCache.set(cacheKey, result);
-  if (lrclibCache.size > 240) {
-    const firstKey = lrclibCache.keys().next().value;
-    lrclibCache.delete(firstKey);
-  }
+  writeMediaCacheJson('lrclib-lyrics', cacheKey, result || null);
   return result;
 }
 async function handleNavidromeLyric(id) {
   id = String(id || '').trim();
   if (!id) return { provider: 'navidrome', lyric: '', error: 'MISSING_ID' };
+  const cached = readMediaCacheJson('navidrome-lyrics', id);
+  if (cached && cached.value) return cached.value;
   function structuredLyricsText(payload) {
     const root = payload && (payload.lyricsList || payload.lyrics || payload);
     const structured = root && (root.structuredLyrics || root.syncedLyrics || root.lyrics || root);
@@ -2474,7 +2629,11 @@ async function handleNavidromeLyric(id) {
   try {
     const body = await navidromeApi('getLyricsBySongId.view', { id });
     const lyricText = structuredLyricsText(body);
-    if (lyricText) return { provider: 'navidrome', lyric: lyricText, source: 'navidrome-songid' };
+    if (lyricText) {
+      const result = { provider: 'navidrome', lyric: lyricText, source: 'navidrome-songid' };
+      writeMediaCacheJson('navidrome-lyrics', id, result);
+      return result;
+    }
   } catch (err) {
     if (!/not.?found|404|70/i.test(String(err.message || err.code || ''))) {
       console.warn('[NavidromeLyric] getLyricsBySongId failed:', err.message || err);
@@ -2492,7 +2651,11 @@ async function handleNavidromeLyric(id) {
     if (artist || title) {
       const legacyBody = await navidromeApi('getLyrics.view', { artist, title });
       navidromePlain = legacyLyricsText(legacyBody);
-      if (hasLrcTimestamps(navidromePlain)) return { provider: 'navidrome', lyric: navidromePlain, source: 'navidrome-title' };
+      if (hasLrcTimestamps(navidromePlain)) {
+        const result = { provider: 'navidrome', lyric: navidromePlain, source: 'navidrome-title' };
+        writeMediaCacheJson('navidrome-lyrics', id, result);
+        return result;
+      }
     }
     const lrclib = await fetchLrclibLyrics({
       trackName: title,
@@ -2500,10 +2663,15 @@ async function handleNavidromeLyric(id) {
       albumName: album,
       duration,
     });
-    if (lrclib && lrclib.lyric) return lrclib;
+    if (lrclib && lrclib.lyric) {
+      writeMediaCacheJson('navidrome-lyrics', id, lrclib);
+      return lrclib;
+    }
     const timedPlain = normalizeLrcCandidate(navidromePlain, duration);
     if (timedPlain) {
-      return { provider: 'navidrome', lyric: timedPlain, source: hasLrcTimestamps(navidromePlain) ? 'navidrome-title' : 'navidrome-title-plain' };
+      const result = { provider: 'navidrome', lyric: timedPlain, source: hasLrcTimestamps(navidromePlain) ? 'navidrome-title' : 'navidrome-title-plain' };
+      writeMediaCacheJson('navidrome-lyrics', id, result);
+      return result;
     }
   } catch (err) {
     if (!/not.?found|404|70/i.test(String(err.message || err.code || ''))) {
@@ -2517,9 +2685,14 @@ async function handleNavidromeLyric(id) {
       albumName: song.album || '',
       duration: Number(song.duration) || 0,
     });
-    if (lrclib && lrclib.lyric) return lrclib;
+    if (lrclib && lrclib.lyric) {
+      writeMediaCacheJson('navidrome-lyrics', id, lrclib);
+      return lrclib;
+    }
   }
-  return { provider: 'navidrome', lyric: '', source: 'navidrome-empty' };
+  const empty = { provider: 'navidrome', lyric: '', source: 'navidrome-empty' };
+  writeMediaCacheJson('navidrome-lyrics', id, empty);
+  return empty;
 }
 async function proxyNavidromeMedia(res, endpoint, id, fallbackType, cacheControl, req) {
   id = String(id || '').trim();
@@ -2560,9 +2733,82 @@ async function fetchWithTimeout(targetUrl, opts, timeoutMs) {
     clearTimeout(timer);
   }
 }
+function sendImageBuffer(res, cached, cacheControl) {
+  res.writeHead(200, {
+    'Content-Type': cached.contentType || 'image/jpeg',
+    'Content-Length': cached.buffer.length,
+    'Access-Control-Allow-Origin': '*',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'Cache-Control': cacheControl || 'public, max-age=31536000, immutable',
+  });
+  res.end(cached.buffer);
+}
+async function proxyCachedNavidromeCover(res, id, cacheControl) {
+  id = String(id || '').trim();
+  if (!id) { res.writeHead(400); res.end('Missing id'); return; }
+  const key = 'navidrome-cover|' + id;
+  const cached = readMediaCacheImage('navidrome-cover', key);
+  if (cached) {
+    sendImageBuffer(res, cached, cacheControl);
+    return;
+  }
+  try {
+    const upstreamUrl = navidromeUrl('getCoverArt.view', { id });
+    const up = await fetchWithTimeout(upstreamUrl, { headers: { 'User-Agent': UA } }, 8000);
+    const ct = up.headers.get('content-type') || 'image/jpeg';
+    if (!up.ok || !/^image\//i.test(ct)) throw new Error('Cover fetch failed ' + up.status);
+    const buffer = Buffer.from(await up.arrayBuffer());
+    writeMediaCacheImage('navidrome-cover', key, buffer, ct);
+    sendImageBuffer(res, { buffer, contentType: ct }, cacheControl);
+  } catch (err) {
+    console.error('[NavidromeCoverCache]', err);
+    res.writeHead(500);
+    res.end();
+  }
+}
+async function proxyExternalArtistImage(res, name) {
+  name = String(name || '').trim();
+  if (!name) { res.writeHead(400); res.end('Missing artist'); return; }
+  const key = externalArtistCacheKey(name);
+  const cached = readMediaCacheImage('external-artist-image', key);
+  if (cached) {
+    sendImageBuffer(res, cached, 'public, max-age=31536000, immutable');
+    return;
+  }
+  const externalUrl = await fetchExternalArtistImage(name);
+  if (!externalUrl) { res.writeHead(404); res.end('Not Found'); return; }
+  try {
+    const up = await fetchWithTimeout(externalUrl, {
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+    }, 6000);
+    const ct = up.headers.get('content-type') || 'image/jpeg';
+    if (!up.ok || !/^image\//i.test(ct)) throw new Error('Artist image fetch failed ' + up.status);
+    const buffer = Buffer.from(await up.arrayBuffer());
+    writeMediaCacheImage('external-artist-image', key, buffer, ct);
+    sendImageBuffer(res, { buffer, contentType: ct }, 'public, max-age=31536000, immutable');
+  } catch (err) {
+    console.warn('[ExternalArtistImage] proxy failed:', err.message || err);
+    res.writeHead(502);
+    res.end();
+  }
+}
 async function proxyExternalImageOrNavidrome(res, req, meta) {
   meta = meta || {};
   const coverId = String(meta.coverId || meta.id || '').trim();
+  const metaKey = externalCoverCacheKey({
+    title: meta.title,
+    artist: meta.artist,
+    album: meta.album,
+    duration: meta.duration,
+  });
+  const cachedExternalImage = readMediaCacheImage('external-cover-image', metaKey);
+  if (cachedExternalImage) {
+    sendImageBuffer(res, cachedExternalImage, 'public, max-age=31536000, immutable');
+    return;
+  }
   let externalUrl = '';
   try {
     externalUrl = await fetchExternalSongCover(meta);
@@ -2579,25 +2825,24 @@ async function proxyExternalImageOrNavidrome(res, req, meta) {
       }, 6000);
       const ct = up.headers.get('content-type') || 'image/jpeg';
       if (up.ok && /^image\//i.test(ct)) {
+        const buffer = Buffer.from(await up.arrayBuffer());
+        writeMediaCacheImage('external-cover-image', metaKey, buffer, ct);
         const hdr = {
           'Content-Type': ct,
+          'Content-Length': buffer.length,
           'Access-Control-Allow-Origin': '*',
           'Cross-Origin-Resource-Policy': 'cross-origin',
-          'Cache-Control': 'public, max-age=604800',
+          'Cache-Control': 'public, max-age=31536000, immutable',
         };
-        const cl = up.headers.get('content-length');
-        if (cl) hdr['Content-Length'] = cl;
         res.writeHead(up.status, hdr);
-        const reader = up.body.getReader();
-        while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
-        res.end();
+        res.end(buffer);
         return;
       }
     } catch (err) {
       console.warn('[ExternalCover] image proxy failed:', err.message || err);
     }
   }
-  await proxyNavidromeMedia(res, 'getCoverArt.view', coverId, 'image/jpeg', 'public, max-age=86400', req);
+  await proxyCachedNavidromeCover(res, coverId, 'public, max-age=31536000, immutable');
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -4148,6 +4393,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pn === '/api/media-cache/status') {
+    sendJSON(res, { ok: true, ...mediaCacheStats() });
+    return;
+  }
+
+  if (pn === '/api/media-cache/clear') {
+    if (req.method !== 'POST') { sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405); return; }
+    sendJSON(res, { ok: true, cleared: true, ...clearMediaCache() });
+    return;
+  }
+
   if (pn === '/api/beatmap/cache') {
     if (req.method === 'GET') {
       const key = url.searchParams.get('key') || '';
@@ -4295,10 +4551,43 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/navidrome/playlists') {
     try {
       const playlists = publicNavidromeStatus().configured ? await handleNavidromePlaylists() : [];
-      sendJSON(res, { provider: 'navidrome', configured: publicNavidromeStatus().configured, playlists });
+      sendJSON(res, {
+        provider: 'navidrome',
+        configured: publicNavidromeStatus().configured,
+        playlists,
+      });
     } catch (err) {
       console.error('[NavidromePlaylists]', err);
       sendJSON(res, { provider: 'navidrome', error: err.message, playlists: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/albums') {
+    try {
+      const albums = publicNavidromeStatus().configured ? await handleNavidromeAlbums() : [];
+      sendJSON(res, {
+        provider: 'navidrome',
+        configured: publicNavidromeStatus().configured,
+        albums,
+      });
+    } catch (err) {
+      console.error('[NavidromeAlbums]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, albums: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/playlist/add-songs') {
+    try {
+      if (!publicNavidromeStatus().configured) { sendJSON(res, { provider: 'navidrome', error: 'NAVIDROME_NOT_CONFIGURED', success: false }, 401); return; }
+      const body = req.method === 'POST' ? await readRequestBody(req) : {};
+      const playlistId = body.playlistId || body.pid || url.searchParams.get('playlistId') || url.searchParams.get('pid');
+      const songIds = body.songIds || body.ids || body.id || url.searchParams.getAll('songId').concat(url.searchParams.getAll('id')).concat(url.searchParams.getAll('ids'));
+      sendJSON(res, { provider: 'navidrome', ...(await handleNavidromeAddSongsToPlaylist(playlistId, songIds)) });
+    } catch (err) {
+      console.error('[NavidromePlaylistAddSongs]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, success: false }, 500);
     }
     return;
   }
@@ -4389,8 +4678,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pn === '/api/external/artist-image') {
+    await proxyExternalArtistImage(res, url.searchParams.get('name') || '');
+    return;
+  }
+
   if (pn === '/api/navidrome/cover') {
-    await proxyNavidromeMedia(res, 'getCoverArt.view', url.searchParams.get('id') || '', 'image/jpeg', 'public, max-age=86400', req);
+    await proxyCachedNavidromeCover(res, url.searchParams.get('id') || '', 'public, max-age=31536000, immutable');
     return;
   }
 
@@ -4984,6 +5278,11 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = url.searchParams.get('id');
       if (!id) { sendJSON(res, { error: 'Missing song id', lyric: '' }, 400); return; }
+      const cached = readMediaCacheJson('netease-lyrics', id);
+      if (cached && cached.value) {
+        sendJSON(res, Object.assign({}, cached.value, { cached: true }));
+        return;
+      }
       let body = {};
       let source = 'lyric';
       try {
@@ -5000,12 +5299,14 @@ const server = http.createServer(async (req, res) => {
         body = r.body || body || {};
         source = 'lyric';
       }
-      sendJSON(res, {
+      const result = {
         lyric: (body.lrc && body.lrc.lyric) || '',
         tlyric: (body.tlyric && body.tlyric.lyric) || '',
         yrc: (body.yrc && body.yrc.lyric) || '',
         source,
-      });
+      };
+      writeMediaCacheJson('netease-lyrics', id, result);
+      sendJSON(res, result);
     } catch (err) {
       console.error('[Lyric]', err);
       sendJSON(res, { error: err.message, lyric: '' }, 500);

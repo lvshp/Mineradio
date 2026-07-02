@@ -827,6 +827,7 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .account-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
 .account-modal-actions .modal-btn{padding:8px 10px}
 .account-hint{margin-top:10px;font-size:11px;line-height:1.45;color:rgba(255,255,255,.38)}
+.account-cache-btn{width:100%;margin-top:12px;color:rgba(255,255,255,.74)}
 .modal .btn-row{display:flex;gap:10px;justify-content:center;margin-top:16px}
 .dual-login-modal .btn-row{flex-wrap:wrap}
 .modal-btn{padding:8px 20px;font-size:12.5px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;cursor:pointer;letter-spacing:.5px;transition:all .2s;font-family:inherit}
@@ -847,6 +848,7 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .cover-zoom-control input{flex:1;accent-color:#f4d28a}
 .cover-crop-modal .btn-row{margin-top:24px}
 @media (max-width: 680px){.cover-crop-modal{padding:24px}.cover-crop-layout{grid-template-columns:1fr;justify-items:center;gap:18px}.cover-crop-side{width:100%}}
+#collect-modal{z-index:72}
 .collect-modal{width:min(430px,90vw);max-width:min(430px,90vw);padding:28px;text-align:left}
 .collect-modal h2{text-align:center;margin-bottom:18px}
 .collect-current{display:flex;align-items:center;gap:12px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);margin-bottom:14px}
@@ -923,6 +925,7 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .album-song-action.like{color:rgba(255,255,255,.70)}
 .album-song-action.like.liked{color:#ff3038;border-color:rgba(255,48,56,.45);background:rgba(255,0,0,.06)}
 .album-song-action.download{color:#ff3642;border-color:rgba(255,54,66,.34);background:rgba(255,0,0,.035)}
+.album-song-action.next{font-size:13px;font-weight:800}
 .album-song-action:hover{transform:translateY(-1px);background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.22)}
 .comment-item,.artist-song-item{display:flex;gap:11px;padding:10px;border-radius:13px;border:1px solid rgba(255,255,255,.075);background:rgba(255,255,255,.045);margin-bottom:7px}
 .comment-avatar{width:32px;height:32px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.07);flex-shrink:0}
@@ -1366,6 +1369,8 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .pl-detail-row-title{font-size:11.5px;font-weight:650;color:rgba(255,255,255,.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pl-detail-row-artist{display:inline-flex;max-width:100%;border:0;background:transparent;color:rgba(var(--fc-accent-rgb),.68);font:500 10.5px var(--font-sans);padding:0;margin-top:2px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pl-detail-row-artist:hover{color:#fff;text-decoration:underline;text-underline-offset:3px}
+.pl-detail-row-act{margin-left:auto;flex:0 0 auto}
+.pl-detail-row:hover .pl-detail-row-act{opacity:1}
 .pl-card.expanded{border-color:rgba(var(--fc-accent-rgb),.32);background:rgba(var(--fc-accent-rgb),.060)}
 .pl-card.podcast-card{border-color:rgba(0,245,212,.075);background:rgba(0,245,212,.030)}
 .pl-card.podcast-card:hover{border-color:rgba(0,245,212,.20);background:rgba(0,245,212,.070)}

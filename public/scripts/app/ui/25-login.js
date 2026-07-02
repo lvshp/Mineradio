@@ -692,6 +692,7 @@ function updateUserModalUi() {
   if (hint) hint.textContent = dualAccountMode
     ? '右上角已切换为双平台并排展示。'
     : '可切换右上角展示的平台；“我两个都要”会并排放两个登录状态。';
+  refreshMediaCacheInfo();
 }
 function showUserModal() {
   if (!hasAnyPlatformLogin()) return showLoginModal();
@@ -699,6 +700,35 @@ function showUserModal() {
   openGsapModal(document.getElementById('user-modal'));
 }
 function closeUserModal() { closeGsapModal(document.getElementById('user-modal')); }
+function formatMediaCacheSize(bytes) {
+  bytes = Number(bytes) || 0;
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2).replace(/\.00$/, '') + ' GB';
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '') + ' MB';
+  if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+  return bytes + ' B';
+}
+async function refreshMediaCacheInfo() {
+  var btn = document.getElementById('account-cache-btn');
+  if (!btn) return;
+  try {
+    var info = await apiJson('/api/media-cache/status?t=' + Date.now());
+    btn.textContent = '清理图片/歌词缓存 · ' + formatMediaCacheSize(info && info.size);
+  } catch (e) {
+    btn.textContent = '清理图片/歌词缓存';
+  }
+}
+async function clearMediaCache() {
+  var btn = document.getElementById('account-cache-btn');
+  if (btn) btn.textContent = '正在清理缓存...';
+  try {
+    var info = await apiJson('/api/media-cache/clear', { method: 'POST' });
+    showToast('图片/歌词缓存已清理');
+    if (btn) btn.textContent = '清理图片/歌词缓存 · ' + formatMediaCacheSize(info && info.size);
+  } catch (e) {
+    showToast('缓存清理失败');
+    refreshMediaCacheInfo();
+  }
+}
 function setActiveAccountProvider(provider) {
   provider = provider === 'qq' || provider === 'navidrome' ? provider : 'netease';
   if (!hasPlatformLogin(provider)) {
@@ -741,9 +771,13 @@ async function logoutActiveAccount() {
   if (activeAccountProvider === 'navidrome') {
     try { await apiJson('/api/navidrome/logout'); } catch (e) {}
     navidromeStatus = normalizeNavidromeStatus(null);
+    navidromeAlbums = [];
+    navidromeAlbumsLoaded = false;
+    userPlaylists = userPlaylists.filter(function(pl){ return pl.provider !== 'navidrome'; });
     dualAccountMode = false;
     activeAccountProvider = firstLoggedProvider();
     renderUserBtn();
+    refreshUserPlaylists(true);
     if (hasAnyPlatformLogin()) updateUserModalUi();
     else closeUserModal();
     showToast('已断开 Navidrome');

@@ -1295,6 +1295,7 @@ var detailArtistAlbums = [];
 var detailArtistMeta = null;
 var detailAlbumSongs = [];
 var detailAlbumMeta = null;
+var trackDetailReturnState = null;
 function normalizeArtistNameForMatch(name) {
   return String(name || '')
     .toLowerCase()
@@ -1444,6 +1445,13 @@ function playNavidromeArtistRandomSongs() {
 function openNavidromeArtistAlbum(i) {
   var album = detailArtistAlbums[i];
   if (!album || !album.id) return;
+  var heading = document.getElementById('track-detail-heading');
+  var body = document.getElementById('track-detail-body');
+  trackDetailReturnState = heading && body ? {
+    heading: heading.textContent || '歌手详情',
+    bodyHtml: body.innerHTML,
+    scrollTop: body.scrollTop || 0
+  } : null;
   openNavidromeAlbumDetail(album);
 }
 function detailPlayIconSvg() {
@@ -1504,7 +1512,9 @@ function renderNavidromeAlbumDetail(album, tracks, loading) {
         '<div class="album-song-actions">' +
           '<button class="album-song-action like' + (isSongLiked(song) ? ' liked' : '') + '" type="button" title="' + (isSongLiked(song) ? '取消红心' : '红心喜欢') + '" data-stop-propagation="true" data-action="toggleLikeNavidromeAlbumTrack" data-action-value="' + i + '">' + heartIconSvg() + '</button>' +
           '<button class="album-song-action download" type="button" title="下载" data-stop-propagation="true" data-action="downloadNavidromeAlbumTrack" data-action-value="' + i + '">' + detailDownloadIconSvg() + '</button>' +
-          '<button class="album-song-action plus" type="button" title="下一首播放" data-stop-propagation="true" data-action="queueNavidromeAlbumTrackNext" data-action-value="' + i + '">' + detailPlusIconSvg() + '</button>' +
+          '<button class="album-song-action next" type="button" title="下一首播放" data-stop-propagation="true" data-action="queueNavidromeAlbumTrackNext" data-action-value="' + i + '">下</button>' +
+          '<button class="album-song-action plus" type="button" title="添加到播放队列" data-stop-propagation="true" data-action="appendNavidromeAlbumTrackToQueue" data-action-value="' + i + '">' + detailPlusIconSvg() + '</button>' +
+          '<button class="album-song-action collect" type="button" title="添加到歌单" data-stop-propagation="true" data-action="collectNavidromeAlbumTrack" data-action-value="' + i + '">' + playlistPlusIconSvg() + '</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -1544,7 +1554,7 @@ function playNavidromeAlbumTrack(i) {
   safeRenderQueuePanel('navidrome-album-track');
   safeSwitchPlaylistTab('queue', 'navidrome-album-track');
   safeShelfRebuild('navidrome-album-track', true);
-  closeTrackDetailModal();
+  closeTrackDetailModal(true);
   playQueueAt(i).catch(function(e){ console.warn('[NavidromeAlbumTrackPlay]', e); });
 }
 function playNavidromeAlbumNow() {
@@ -1562,7 +1572,7 @@ function shuffleNavidromeAlbum() {
   safeRenderQueuePanel('navidrome-album-shuffle');
   safeSwitchPlaylistTab('queue', 'navidrome-album-shuffle');
   safeShelfRebuild('navidrome-album-shuffle', true);
-  closeTrackDetailModal();
+  closeTrackDetailModal(true);
   if (songs.length) playQueueAt(0).catch(function(e){ console.warn('[NavidromeAlbumShuffle]', e); });
 }
 function insertSongsNext(songs) {
@@ -1578,7 +1588,8 @@ function appendNavidromeAlbumToQueue() {
   showToast('已添加到播放队列');
 }
 function collectNavidromeAlbum() {
-  showToast('Navidrome 添加到歌单待接入');
+  if (!detailAlbumSongs.length) { showToast('专辑暂无可收藏歌曲'); return; }
+  openCollectModal(detailAlbumSongs[0], { songs: detailAlbumSongs, title: (detailAlbumMeta && detailAlbumMeta.name) || 'Navidrome 专辑' });
 }
 function navidromeDownloadFile(song) {
   if (!song || songProviderKey(song) !== 'navidrome' || !song.id) return;
@@ -1603,6 +1614,14 @@ function downloadNavidromeAlbumTrack(i) {
 function queueNavidromeAlbumTrackNext(i) {
   if (!detailAlbumSongs[i]) return;
   queueDetailSongNext(detailAlbumSongs[i]);
+}
+function appendNavidromeAlbumTrackToQueue(i) {
+  if (!detailAlbumSongs[i]) return;
+  queueSong(detailAlbumSongs[i]);
+  showToast('已添加到播放队列: ' + (detailAlbumSongs[i].name || ''));
+}
+function collectNavidromeAlbumTrack(i) {
+  if (detailAlbumSongs[i]) openCollectModal(detailAlbumSongs[i]);
 }
 function toggleLikeNavidromeAlbumTrack(i) {
   if (detailAlbumSongs[i]) toggleLikeSong(detailAlbumSongs[i]);
@@ -1632,12 +1651,30 @@ function bindTrackDetailScrollers() {
   bindSmoothWheelScroll(body);
   if (body) body.querySelectorAll('.detail-scroll').forEach(bindSmoothWheelScroll);
 }
-function closeTrackDetailModal() {
+function closeTrackDetailModal(forceClose) {
+  if (!forceClose && trackDetailReturnState) {
+    var state = trackDetailReturnState;
+    trackDetailReturnState = null;
+    trackDetailSeq++;
+    var heading = document.getElementById('track-detail-heading');
+    var body = document.getElementById('track-detail-body');
+    if (heading) heading.textContent = state.heading || '歌手详情';
+    if (body) {
+      body.innerHTML = state.bodyHtml || '';
+      body.scrollTop = state.scrollTop || 0;
+    }
+    detailAlbumSongs = [];
+    detailAlbumMeta = null;
+    bindTrackDetailScrollers();
+    return;
+  }
+  trackDetailReturnState = null;
   closeGsapModal(document.getElementById('track-detail-modal'));
 }
 function openTrackDetailModal(type, songOverride) {
   var song = songOverride || currentCoverSong();
   if (!song) { showToast('先播放或选择一首歌'); return; }
+  trackDetailReturnState = null;
   if (immersiveMode) setImmersiveMode(false);
   var heading = document.getElementById('track-detail-heading');
   var body = document.getElementById('track-detail-body');
@@ -2279,17 +2316,28 @@ function toggleLikeCurrent() { toggleLikeSong(currentCoverSong()); }
 function toggleLikeSearchResult(i) { if (playlist[i]) toggleLikeSong(playlist[i]); }
 function toggleLikeQueueIndex(i) { if (playQueue[i]) toggleLikeSong(playQueue[i]); }
 function toggleLikeDetailSong(song) { toggleLikeSong(song); }
-function openCollectModal(song) {
-  if (!isCloudSong(song)) {
-    var key = songProviderKey(song);
-    showToast(key === 'qq' ? 'QQ 音乐收藏到歌单待登录接口接入' : (key === 'navidrome' ? 'Navidrome 暂不支持收藏到歌单' : '本地文件暂不支持收藏到网易云歌单'));
+function openCollectModal(song, opts) {
+  opts = opts || {};
+  var songs = (opts.songs || (song ? [song] : [])).map(cloneSong).filter(Boolean);
+  var firstSong = songs[0] || song;
+  var providerKey = songProviderKey(firstSong);
+  if (providerKey === 'navidrome') {
+    if (!navidromeStatus.loggedIn) { showToast('先连接 Navidrome'); return; }
+  } else if (!isCloudSong(firstSong)) {
+    showToast(providerKey === 'qq' ? 'QQ 音乐收藏到歌单待登录接口接入' : '本地文件暂不支持收藏到网易云歌单');
     return;
   }
-  if (!ensureLoggedInForAction()) return;
-  collectTargetSong = song;
+  if (providerKey !== 'navidrome' && !ensureLoggedInForAction()) return;
+  collectTargetSong = firstSong;
+  collectTargetSongs = songs;
+  if (opts.title && collectTargetSong) collectTargetSong.collectTitle = opts.title;
   renderCollectModal();
   openGsapModal(document.getElementById('collect-modal'));
-  refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  if (providerKey === 'navidrome') {
+    refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  } else {
+    refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  }
 }
 function openCollectModalForCurrent() { openCollectModal(currentCoverSong()); }
 function collectSearchResult(i) { if (playlist[i]) openCollectModal(playlist[i]); }
@@ -2298,6 +2346,7 @@ function collectDetailSong(song) { openCollectModal(song); }
 function closeCollectModal() {
   closeGsapModal(document.getElementById('collect-modal'), function(){
     collectTargetSong = null;
+    collectTargetSongs = [];
     var input = document.getElementById('collect-new-name');
     if (input) input.value = '';
   });
@@ -2307,9 +2356,33 @@ function renderCollectModal() {
   var list = document.getElementById('collect-list');
   if (!current || !list) return;
   var song = collectTargetSong || {};
+  var targets = (collectTargetSongs && collectTargetSongs.length ? collectTargetSongs : (song.id ? [song] : []));
+  var isNavidromeCollect = songProviderKey(song) === 'navidrome';
+  var createBox = document.querySelector('#collect-modal .collect-create');
+  if (createBox) createBox.style.display = isNavidromeCollect ? 'none' : '';
   var cover = songCoverSrc(song, 80);
   current.innerHTML = (cover ? '<img src="' + cover + '" alt="">' : '<div class="cover-placeholder"></div>') +
-    '<div style="min-width:0"><div class="collect-title">' + escHtml(song.name || '当前歌曲') + '</div><div class="collect-sub">' + escHtml(song.artist || '') + '</div></div>';
+    '<div style="min-width:0"><div class="collect-title">' + escHtml(targets.length > 1 ? (song.collectTitle || ('批量收藏 ' + targets.length + ' 首')) : (song.name || '当前歌曲')) + '</div><div class="collect-sub">' + escHtml(targets.length > 1 ? ('Navidrome · ' + targets.length + ' 首') : (song.artist || '')) + '</div></div>';
+  if (isNavidromeCollect) {
+    if (!navidromeStatus.loggedIn) {
+      list.innerHTML = '<div class="collect-empty">连接 Navidrome 后显示歌单</div>';
+      return;
+    }
+    var ndLists = userPlaylists.filter(function(pl){ return pl.provider === 'navidrome' && !String(pl.id || '').startsWith('virtual:') && !String(pl.id || '').startsWith('album:'); });
+    if (!ndLists.length) {
+      list.innerHTML = '<div class="collect-empty">Navidrome 还没有可写入的歌单</div>';
+      return;
+    }
+    list.innerHTML = ndLists.map(function(pl){
+      var thumb = pl.cover ? coverUrlWithSize(pl.cover, 80) : '';
+      return '<div class="collect-item" data-collect-pid="' + escHtml(String(pl.id || '')) + '" data-action="addCollectTargetToPlaylist" data-action-value="' + escHtml(String(pl.id || '')) + '">' +
+        (thumb ? '<img src="' + thumb + '" alt="">' : '<div class="cover-placeholder"></div>') +
+        '<div style="min-width:0"><div class="collect-title">' + escHtml(pl.name || '') + '</div><div class="collect-sub">Navidrome · ' + (pl.trackCount || 0) + ' 首</div></div>' +
+      '</div>';
+    }).join('');
+    if (window.gsap) animateListItems(list, '.collect-item', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
+    return;
+  }
   if (!loginStatus.loggedIn) {
     list.innerHTML = '<div class="collect-empty">登录后显示你的歌单</div>';
     return;
@@ -2391,21 +2464,39 @@ async function addCollectTargetToPlaylist(pid) {
   updateLikeButtons();
   showToast('正在收藏到歌单...');
   try {
+    var targets = (collectTargetSongs && collectTargetSongs.length ? collectTargetSongs : [collectTargetSong]).filter(Boolean);
     var songId = String(collectTargetSong.id || '');
-    var r = await apiJson('/api/playlist/add-song', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pid: pid, id: songId })
-    });
-    if (!(r && r.success)) throw new Error(collectResultMessage(r));
-    showToast('已收藏到歌单');
+    var isNavidromeCollect = songProviderKey(collectTargetSong) === 'navidrome';
+    var r = isNavidromeCollect
+      ? await apiJson('/api/navidrome/playlist/add-songs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playlistId: pid, songIds: targets.map(function(song){ return song.id; }) })
+        })
+      : await apiJson('/api/playlist/add-song', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid: pid, id: songId })
+        });
+    if (!(r && r.success)) throw new Error(isNavidromeCollect ? (r && (r.error || r.message) || '收藏失败') : collectResultMessage(r));
+    if (isNavidromeCollect) {
+      var addedCount = Number(r.added || 0);
+      var duplicateCount = Number(r.duplicate || 0);
+      if (!addedCount && duplicateCount) showToast(targets.length > 1 ? ('歌曲已在歌单中，跳过 ' + duplicateCount + ' 首') : '歌曲已在歌单中');
+      else if (targets.length > 1) showToast('已收藏 ' + addedCount + ' 首到歌单' + (duplicateCount ? ('，跳过 ' + duplicateCount + ' 首重复') : ''));
+      else showToast('已收藏到歌单');
+    } else {
+      showToast('已收藏到歌单');
+    }
     closeCollectModal();
     refreshUserPlaylists(true);
-    setTimeout(function(){
-      verifySongInPlaylist(pid, songId).then(function(ok){
-        if (!ok) console.warn('collect submitted but verify did not find song yet:', pid, songId);
-      });
-    }, 900);
+    if (!isNavidromeCollect) {
+      setTimeout(function(){
+        verifySongInPlaylist(pid, songId).then(function(ok){
+          if (!ok) console.warn('collect submitted but verify did not find song yet:', pid, songId);
+        });
+      }, 900);
+    }
   } catch (err) {
     showToast(err && err.message ? err.message : '收藏失败');
   } finally {

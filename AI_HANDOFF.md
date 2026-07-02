@@ -8,8 +8,8 @@
 - 当前工作分支：`main`
 - 当前 fork 远端：以 `git remote -v` 的 `origin` 为准
 - 上游参考远端：如存在 `upstream`，只作为参考，不作为默认发布目标
-- 当前源码版本：`v1.0.0`
-- 当前 Release：以当前仓库对应的 `v1.0.0` Release 为准
+- 当前源码版本：以 `package.json` 为准；2026-07-03 已升到 `v1.1.0`
+- 当前 Release：以当前仓库对应的最新 Release 为准；2026-07-03 用户已反馈网页产物已发布
 - 当前 release workflow：`.github/workflows/release.yml`
 - 当前本地服务默认启动命令：`PORT=3100 HOST=127.0.0.1 node server.js`
 - 当前本地访问地址：`http://127.0.0.1:3100`
@@ -197,6 +197,89 @@ Release 地址：
   - 歌手详情、专辑详情等样式
 
 ## 最近工作日志
+
+### 2026-07-03 - Navidrome 歌单/专辑、收藏、缓存与首页左侧方案交接
+
+本轮已做的主要改动：
+
+- Navidrome 歌单和专辑拆分：`/api/navidrome/playlists` 返回真实 ND 歌单和虚拟随机/收藏入口；`/api/navidrome/albums` 单独返回 ND 全部专辑。前端左侧歌单面板增加 `ND专辑` 标签，只有登录 Navidrome 时显示；原来混在“我的歌单”里的 Navidrome 全部专辑移到 `ND专辑`。
+- 歌单/专辑展开歌曲行补齐操作按钮：展开专辑后的歌曲列表加了类似队列行的喜欢、下一个播放、添加到队列、添加到歌单等操作，移除了不适合这里的移除按钮。
+- Navidrome 收藏到歌单已实装：新增后端 `/api/navidrome/playlist/add-songs`，调用 OpenSubsonic/Navidrome `updatePlaylist.view`，以重复 `songIdToAdd` 添加歌曲。添加前会读取目标歌单现有歌曲，跳过重复项并返回 `added` / `duplicate`。
+- 前端 `openCollectModal()` 按歌曲来源分流：ND 歌曲弹出 ND 可写歌单列表；网易云歌曲继续走原逻辑；QQ/本地仍按旧提示处理。单曲重复提示“歌曲已在歌单中”，批量收藏会提示已收藏数量和跳过重复数量。
+- 歌手主页进入专辑详情后的关闭行为已调整：从歌手主页打开专辑详情时，缓存上一层歌手主页 HTML；点击关闭或空白处返回歌手主页，不再把整个详情弹层全关掉。播放、随机等明确跳转播放行为可以强制关闭详情。
+- 专辑详情里的收藏弹窗层级已修：`#collect-modal` 的 `z-index` 提高到专辑详情之上，避免点击“添加到歌单”后弹窗被遮挡。
+- 账号信息里新增缓存清理入口：`#account-cache-btn` 会显示媒体缓存大小，点击后调用 `/api/media-cache/clear`，清理图片和歌词缓存。
+- 媒体缓存改为永久缓存直到手动清理：新增 `MEDIA_CACHE_ROOT`，默认放在用户应用数据目录下的 `Mineradio/media-cache`，也可用 `MINERADIO_MEDIA_CACHE_DIR` 覆盖。Navidrome 封面、Navidrome 歌词、LRCLIB 歌词、网易云歌词、第三方单曲封面 URL 和下载后的第三方图片都会落盘缓存；缓存响应使用长缓存头，只有用户点清理缓存才清除。
+- 单曲封面兜底符合用户需求：Navidrome 服务器通常只能给到专辑图，单曲没有独立图片时，会向第三方源查单曲封面；查到后把第三方封面 URL 和图片二进制都缓存起来，下次优先用本地缓存，不再重复请求第三方。
+- 歌手主页头像增加外部兜底：Navidrome 歌手图优先用服务器 `coverArt` / `artistImageUrl`；没有时尝试 `/api/external/artist-image?name=...` 的 Deezer 歌手图代理；再没有才回落首张专辑封面或前端首字母占位。
+
+已做过的验证记录：
+
+- `node --check server.js`
+- `Get-ChildItem -Recurse -File public\scripts\app -Filter *.js | Sort-Object FullName | ForEach-Object { node --check $_.FullName }`
+- `git diff --check`
+- `npm run build:app`
+- `node --check public\scripts\app.bundle.js`
+- 临时服务 smoke test：`PORT=3101 node server.js`
+- `/api/media-cache/status` 能返回缓存目录和大小。
+- `/api/external/artist-image?name=林树` 曾返回 `200 image/jpeg` 并写入缓存。
+- `/api/navidrome/playlist/add-songs` 在未配置 ND 时返回预期的 `401 NAVIDROME_NOT_CONFIGURED`。
+
+本地 Windows 包构建记录：
+
+- 之前成功产物：`dist/Mineradio-1.0.1-Setup.exe`
+- SHA256：`4091CD1955FF8AD84A75EBDB80F0D530F43DF882D06B6EE8E11295CC1F6A9CA5`
+- 后续又新增了媒体缓存和歌手图片相关改动，如用户要安装最新本地版，需要重新完整执行 `npm run build:win`，不要直接复用旧 hash。
+
+#### 首页左侧组合版设计方案（用户已决定采用）
+
+用户最终确认：首页左侧做“沉浸播放看板”，下方融合“私人电台快捷入口”。目标是让左侧大区域既高级又实用，不要继续放普通卡片或施工占位；右侧继续承担歌单、专辑、推荐内容，不要打散右侧现有 `.home-grid` / `.home-rail` 的分工。
+
+实现入口建议：
+
+- HTML 入口：`public/index.html` 的 `#empty-home`，尤其是左侧 `.home-hero`。当前结构里 `.home-hero-inner.home-construction-inner` 还是“此处施工”占位，优先替换这里。
+- 样式入口：`public/styles/main.css` 的 `/* ---------- 空场 Home ---------- */` 段落，已有 `.home-hero`、`.home-grid`、`.home-rail`、`.home-chip`、`.home-mosaic` 等样式。新增样式尽量沿用这些变量和暗色高级质感，不要做廉价大渐变或过度透明。
+- 行为入口：先用 `rg "openHomePlayerConsole|playHomeSong|playHomeRecent|openHomeLibrary|updateEmptyHomeVisibility|emptyHomeActive"` 定位 Home 相关逻辑；前端源码在 `public/scripts/app/**`，不要直接改 bundle。改完必须 `npm run build:app`。
+
+建议的左侧结构：
+
+1. 沉浸播放看板主体
+   - 大封面或歌手图作为背景/视觉核心。优先用当前播放歌曲的 `cover`、Navidrome 单曲封面缓存、歌手图；没有播放时用最近播放或推荐歌曲封面；再没有才使用精致占位。
+   - 显示当前歌曲名、歌手、来源标签（ND / 网易 / QQ / 本地）、音质或“服务器原清晰度”等状态。Navidrome 不做清晰度切换，显示“服务器原始音质/原清晰度”即可。
+   - 显示当前播放进度或简化波形，不要做高成本动画；可以复用已有 `home-wave-track` 思路。
+   - 显示当前歌词一句或下一句歌词。没有歌词时显示专辑/歌手/来源状态，不要出现空白大块。
+   - 快捷按钮：播放/暂停、喜欢、下一个播放、添加到队列、添加到歌单、去歌手/专辑。图标优先复用现有按钮 SVG/函数和 `data-action` 分发，不要重新写一套孤立事件。
+
+2. 私人电台快捷入口
+   - 放在沉浸播放看板下方，作为紧凑入口组，不要做成六张普通大卡。
+   - 推荐入口：
+     - 继续上次
+     - 随机播放 Navidrome
+     - 最近收藏
+     - 最近添加
+     - 未听专辑
+     - 深夜随机 / 工作流 / 通勤
+   - 已登录 Navidrome 时优先出现 ND 相关入口：随机 ND、最近添加 ND 专辑、ND 收藏歌曲、ND 歌单。未登录 ND 时隐藏这些入口或降级成普通“继续听/每日推荐/本地队列”。
+   - 点击入口应尽量复用现有播放队列函数：例如 `loadPlaylistIntoQueueById()`、Navidrome 随机/收藏接口、`playHomeRecent()`、`playHomeSong()`。不要为了 Home 新入口复制一套播放队列逻辑。
+
+3. 状态和空态
+   - 正在播放：看板以当前播放为主，歌词/进度/来源实时更新。
+   - 暂停但有歌曲：保持当前歌曲信息，按钮显示可继续播放。
+   - 没有播放但有最近播放：展示“继续听”歌曲或最近队列第一首。
+   - 完全空态：展示一个安静高级的默认看板，主按钮是“打开歌单库/连接 Navidrome/展开播放器控制台”，但不要再显示“施工”。
+
+4. 视觉边界
+   - 左侧是沉浸看板，不要再塞普通信息卡；右侧继续放歌单、推荐和内容 tile。
+   - 不要使用单一紫蓝/深蓝大渐变铺满；可以用封面取色、暗色玻璃、细线、低饱和点缀，整体保持 Mineradio 现有暗色高级感。
+   - 动效要轻：封面呼吸、波形、歌词淡入即可。避免持续高 CPU 的大面积滤镜、频繁布局重排或过多阴影动画。
+   - 桌面端和小窗口都要检查文字不溢出，按钮不重叠。`.empty-home-shell` 当前是两列布局，移动/窄屏需要确认 `.home-hero` 不挤爆右侧区域。
+
+5. 推荐实施顺序
+   - 第一步：替换左侧 HTML 占位，做静态沉浸播放看板和快捷入口组。
+   - 第二步：接入当前播放状态、封面、来源、歌词一句和播放/暂停/喜欢/队列按钮。
+   - 第三步：接入 Navidrome 登录态，显示 ND 快捷入口；未登录时隐藏 ND 入口。
+   - 第四步：补齐空态、窄屏样式、按钮 tooltip/aria-label。
+   - 第五步：运行 `npm run build:app`、JS 语法检查、`git diff --check`，再实际启动服务或 Electron 看首页。
 
 ### 2026-07-02 - fork 从 v1.0.0 重新起步
 

@@ -450,6 +450,7 @@ try {
   <div class="panel-tabs">
     <button id="tab-queue" class="panel-tab active" data-action="switchPlaylistTab" data-action-value="queue">当前队列</button>
     <button id="tab-pl" class="panel-tab" data-action="switchPlaylistTab" data-action-value="playlists">我的歌单</button>
+    <button id="tab-nd-albums" class="panel-tab" data-action="switchPlaylistTab" data-action-value="navidromeAlbums" style="display:none">ND专辑</button>
     <button id="tab-podcast" class="panel-tab" data-action="switchPlaylistTab" data-action-value="podcasts">我的播客</button>
   </div>
   <div id="queue-pane">
@@ -475,6 +476,13 @@ try {
       <button class="fx-mini-btn ghost" data-action="refreshUserPlaylists" data-action-value="true" style="height:26px;padding:0 10px;font-size:11px">刷新</button>
     </div>
     <div id="podcast-list"></div>
+  </div>
+  <div id="nd-album-pane" style="display:none">
+    <div class="queue-toolbar">
+      <div class="queue-chip">Navidrome 专辑</div>
+      <button class="fx-mini-btn ghost" data-action="refreshUserPlaylists" data-action-value="true" style="height:26px;padding:0 10px;font-size:11px">刷新</button>
+    </div>
+    <div id="nd-album-list" style="margin-top:6px"></div>
   </div>
 </div>
 
@@ -705,6 +713,7 @@ try {
       <button id="account-add-navidrome" class="modal-btn" data-action="openProviderLogin" data-action-value="navidrome">连接 Navidrome</button>
     </div>
     <div id="account-hint" class="account-hint">QQ 音乐真实登录暂未接入，当前先预览双平台账号交互。</div>
+    <button id="account-cache-btn" class="modal-btn account-cache-btn" data-action="clearMediaCache">清理图片/歌词缓存</button>
     <div class="btn-row">
       <button class="modal-btn" data-action="closeUserModal">关闭</button>
       <button id="account-logout-btn" class="modal-btn primary" data-action="logoutActiveAccount">退出当前平台</button>

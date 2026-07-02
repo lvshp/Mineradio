@@ -41,7 +41,7 @@ var audioFadeTimer = null, audioElementFadeFrame = 0, audioFadeSerial = 0;
 var AUDIO_FADE_IN_MS = 460;
 var AUDIO_FADE_OUT_MS = 420;
 var AUDIO_SILENCE_GAIN = 0.0001;
-var userPlaylists = [], qqPlaylists = [], myPodcastCollections = [], myPodcastItems = {}, playlistCoverCache = {};
+var userPlaylists = [], qqPlaylists = [], navidromeAlbums = [], navidromeAlbumsLoaded = false, myPodcastCollections = [], myPodcastItems = {}, playlistCoverCache = {};
 var CUSTOM_COVER_STORE_KEY = 'mineradio-custom-covers';
 var CUSTOM_LYRIC_STORE_KEY = 'mineradio-custom-lyrics-v1';
 var CUSTOM_LYRIC_PREF_STORE_KEY = 'mineradio-custom-lyric-prefs-v1';
@@ -85,7 +85,7 @@ var lyricSourceMode = 'original';
 var originalLyricsState = { lines: [], hasNativeKaraoke: false, timingSource: 'none' };
 var localBeatAnalysis = { song:null, audioUrl:'', mode:'mr', active:false, token:0 };
 var likedSongMap = {}, likeBusyMap = {}, likeStatusToken = 0;
-var collectTargetSong = null, collectBusy = false;
+var collectTargetSong = null, collectTargetSongs = [], collectBusy = false;
 var uploadTipTimer = null, uploadTipAttempts = 0;
 var visualGuideActive = false, visualGuideStep = 0, visualGuideResizeBound = false;
 var visualGuideState = { bottomWasVisible: false, searchWasPeek: false, manual: false };
@@ -135,6 +135,7 @@ var miniQueueRenderSeq = 0, queueRenderSeq = 0, playlistRenderSeq = 0;
 var queuePanelDirty = false;
 var PLAYLIST_PANEL_BATCH_SIZE = 28;
 var playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
+var navidromeAlbumRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
 var playlistPanelLazyBound = false;
 var PLAYLIST_DETAIL_INITIAL_RENDER = 64;
 var PLAYLIST_DETAIL_BATCH_SIZE = 48;
@@ -13716,6 +13717,7 @@ var detailArtistAlbums = [];
 var detailArtistMeta = null;
 var detailAlbumSongs = [];
 var detailAlbumMeta = null;
+var trackDetailReturnState = null;
 function normalizeArtistNameForMatch(name) {
   return String(name || '')
     .toLowerCase()
@@ -13865,6 +13867,13 @@ function playNavidromeArtistRandomSongs() {
 function openNavidromeArtistAlbum(i) {
   var album = detailArtistAlbums[i];
   if (!album || !album.id) return;
+  var heading = document.getElementById('track-detail-heading');
+  var body = document.getElementById('track-detail-body');
+  trackDetailReturnState = heading && body ? {
+    heading: heading.textContent || '歌手详情',
+    bodyHtml: body.innerHTML,
+    scrollTop: body.scrollTop || 0
+  } : null;
   openNavidromeAlbumDetail(album);
 }
 function detailPlayIconSvg() {
@@ -13925,7 +13934,9 @@ function renderNavidromeAlbumDetail(album, tracks, loading) {
         '<div class="album-song-actions">' +
           '<button class="album-song-action like' + (isSongLiked(song) ? ' liked' : '') + '" type="button" title="' + (isSongLiked(song) ? '取消红心' : '红心喜欢') + '" data-stop-propagation="true" data-action="toggleLikeNavidromeAlbumTrack" data-action-value="' + i + '">' + heartIconSvg() + '</button>' +
           '<button class="album-song-action download" type="button" title="下载" data-stop-propagation="true" data-action="downloadNavidromeAlbumTrack" data-action-value="' + i + '">' + detailDownloadIconSvg() + '</button>' +
-          '<button class="album-song-action plus" type="button" title="下一首播放" data-stop-propagation="true" data-action="queueNavidromeAlbumTrackNext" data-action-value="' + i + '">' + detailPlusIconSvg() + '</button>' +
+          '<button class="album-song-action next" type="button" title="下一首播放" data-stop-propagation="true" data-action="queueNavidromeAlbumTrackNext" data-action-value="' + i + '">下</button>' +
+          '<button class="album-song-action plus" type="button" title="添加到播放队列" data-stop-propagation="true" data-action="appendNavidromeAlbumTrackToQueue" data-action-value="' + i + '">' + detailPlusIconSvg() + '</button>' +
+          '<button class="album-song-action collect" type="button" title="添加到歌单" data-stop-propagation="true" data-action="collectNavidromeAlbumTrack" data-action-value="' + i + '">' + playlistPlusIconSvg() + '</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -13965,7 +13976,7 @@ function playNavidromeAlbumTrack(i) {
   safeRenderQueuePanel('navidrome-album-track');
   safeSwitchPlaylistTab('queue', 'navidrome-album-track');
   safeShelfRebuild('navidrome-album-track', true);
-  closeTrackDetailModal();
+  closeTrackDetailModal(true);
   playQueueAt(i).catch(function(e){ console.warn('[NavidromeAlbumTrackPlay]', e); });
 }
 function playNavidromeAlbumNow() {
@@ -13983,7 +13994,7 @@ function shuffleNavidromeAlbum() {
   safeRenderQueuePanel('navidrome-album-shuffle');
   safeSwitchPlaylistTab('queue', 'navidrome-album-shuffle');
   safeShelfRebuild('navidrome-album-shuffle', true);
-  closeTrackDetailModal();
+  closeTrackDetailModal(true);
   if (songs.length) playQueueAt(0).catch(function(e){ console.warn('[NavidromeAlbumShuffle]', e); });
 }
 function insertSongsNext(songs) {
@@ -13999,7 +14010,8 @@ function appendNavidromeAlbumToQueue() {
   showToast('已添加到播放队列');
 }
 function collectNavidromeAlbum() {
-  showToast('Navidrome 添加到歌单待接入');
+  if (!detailAlbumSongs.length) { showToast('专辑暂无可收藏歌曲'); return; }
+  openCollectModal(detailAlbumSongs[0], { songs: detailAlbumSongs, title: (detailAlbumMeta && detailAlbumMeta.name) || 'Navidrome 专辑' });
 }
 function navidromeDownloadFile(song) {
   if (!song || songProviderKey(song) !== 'navidrome' || !song.id) return;
@@ -14024,6 +14036,14 @@ function downloadNavidromeAlbumTrack(i) {
 function queueNavidromeAlbumTrackNext(i) {
   if (!detailAlbumSongs[i]) return;
   queueDetailSongNext(detailAlbumSongs[i]);
+}
+function appendNavidromeAlbumTrackToQueue(i) {
+  if (!detailAlbumSongs[i]) return;
+  queueSong(detailAlbumSongs[i]);
+  showToast('已添加到播放队列: ' + (detailAlbumSongs[i].name || ''));
+}
+function collectNavidromeAlbumTrack(i) {
+  if (detailAlbumSongs[i]) openCollectModal(detailAlbumSongs[i]);
 }
 function toggleLikeNavidromeAlbumTrack(i) {
   if (detailAlbumSongs[i]) toggleLikeSong(detailAlbumSongs[i]);
@@ -14053,12 +14073,30 @@ function bindTrackDetailScrollers() {
   bindSmoothWheelScroll(body);
   if (body) body.querySelectorAll('.detail-scroll').forEach(bindSmoothWheelScroll);
 }
-function closeTrackDetailModal() {
+function closeTrackDetailModal(forceClose) {
+  if (!forceClose && trackDetailReturnState) {
+    var state = trackDetailReturnState;
+    trackDetailReturnState = null;
+    trackDetailSeq++;
+    var heading = document.getElementById('track-detail-heading');
+    var body = document.getElementById('track-detail-body');
+    if (heading) heading.textContent = state.heading || '歌手详情';
+    if (body) {
+      body.innerHTML = state.bodyHtml || '';
+      body.scrollTop = state.scrollTop || 0;
+    }
+    detailAlbumSongs = [];
+    detailAlbumMeta = null;
+    bindTrackDetailScrollers();
+    return;
+  }
+  trackDetailReturnState = null;
   closeGsapModal(document.getElementById('track-detail-modal'));
 }
 function openTrackDetailModal(type, songOverride) {
   var song = songOverride || currentCoverSong();
   if (!song) { showToast('先播放或选择一首歌'); return; }
+  trackDetailReturnState = null;
   if (immersiveMode) setImmersiveMode(false);
   var heading = document.getElementById('track-detail-heading');
   var body = document.getElementById('track-detail-body');
@@ -14700,17 +14738,28 @@ function toggleLikeCurrent() { toggleLikeSong(currentCoverSong()); }
 function toggleLikeSearchResult(i) { if (playlist[i]) toggleLikeSong(playlist[i]); }
 function toggleLikeQueueIndex(i) { if (playQueue[i]) toggleLikeSong(playQueue[i]); }
 function toggleLikeDetailSong(song) { toggleLikeSong(song); }
-function openCollectModal(song) {
-  if (!isCloudSong(song)) {
-    var key = songProviderKey(song);
-    showToast(key === 'qq' ? 'QQ 音乐收藏到歌单待登录接口接入' : (key === 'navidrome' ? 'Navidrome 暂不支持收藏到歌单' : '本地文件暂不支持收藏到网易云歌单'));
+function openCollectModal(song, opts) {
+  opts = opts || {};
+  var songs = (opts.songs || (song ? [song] : [])).map(cloneSong).filter(Boolean);
+  var firstSong = songs[0] || song;
+  var providerKey = songProviderKey(firstSong);
+  if (providerKey === 'navidrome') {
+    if (!navidromeStatus.loggedIn) { showToast('先连接 Navidrome'); return; }
+  } else if (!isCloudSong(firstSong)) {
+    showToast(providerKey === 'qq' ? 'QQ 音乐收藏到歌单待登录接口接入' : '本地文件暂不支持收藏到网易云歌单');
     return;
   }
-  if (!ensureLoggedInForAction()) return;
-  collectTargetSong = song;
+  if (providerKey !== 'navidrome' && !ensureLoggedInForAction()) return;
+  collectTargetSong = firstSong;
+  collectTargetSongs = songs;
+  if (opts.title && collectTargetSong) collectTargetSong.collectTitle = opts.title;
   renderCollectModal();
   openGsapModal(document.getElementById('collect-modal'));
-  refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  if (providerKey === 'navidrome') {
+    refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  } else {
+    refreshUserPlaylists(true).then(function(){ renderCollectModal(); }).catch(function(){ renderCollectModal(); });
+  }
 }
 function openCollectModalForCurrent() { openCollectModal(currentCoverSong()); }
 function collectSearchResult(i) { if (playlist[i]) openCollectModal(playlist[i]); }
@@ -14719,6 +14768,7 @@ function collectDetailSong(song) { openCollectModal(song); }
 function closeCollectModal() {
   closeGsapModal(document.getElementById('collect-modal'), function(){
     collectTargetSong = null;
+    collectTargetSongs = [];
     var input = document.getElementById('collect-new-name');
     if (input) input.value = '';
   });
@@ -14728,9 +14778,33 @@ function renderCollectModal() {
   var list = document.getElementById('collect-list');
   if (!current || !list) return;
   var song = collectTargetSong || {};
+  var targets = (collectTargetSongs && collectTargetSongs.length ? collectTargetSongs : (song.id ? [song] : []));
+  var isNavidromeCollect = songProviderKey(song) === 'navidrome';
+  var createBox = document.querySelector('#collect-modal .collect-create');
+  if (createBox) createBox.style.display = isNavidromeCollect ? 'none' : '';
   var cover = songCoverSrc(song, 80);
   current.innerHTML = (cover ? '<img src="' + cover + '" alt="">' : '<div class="cover-placeholder"></div>') +
-    '<div style="min-width:0"><div class="collect-title">' + escHtml(song.name || '当前歌曲') + '</div><div class="collect-sub">' + escHtml(song.artist || '') + '</div></div>';
+    '<div style="min-width:0"><div class="collect-title">' + escHtml(targets.length > 1 ? (song.collectTitle || ('批量收藏 ' + targets.length + ' 首')) : (song.name || '当前歌曲')) + '</div><div class="collect-sub">' + escHtml(targets.length > 1 ? ('Navidrome · ' + targets.length + ' 首') : (song.artist || '')) + '</div></div>';
+  if (isNavidromeCollect) {
+    if (!navidromeStatus.loggedIn) {
+      list.innerHTML = '<div class="collect-empty">连接 Navidrome 后显示歌单</div>';
+      return;
+    }
+    var ndLists = userPlaylists.filter(function(pl){ return pl.provider === 'navidrome' && !String(pl.id || '').startsWith('virtual:') && !String(pl.id || '').startsWith('album:'); });
+    if (!ndLists.length) {
+      list.innerHTML = '<div class="collect-empty">Navidrome 还没有可写入的歌单</div>';
+      return;
+    }
+    list.innerHTML = ndLists.map(function(pl){
+      var thumb = pl.cover ? coverUrlWithSize(pl.cover, 80) : '';
+      return '<div class="collect-item" data-collect-pid="' + escHtml(String(pl.id || '')) + '" data-action="addCollectTargetToPlaylist" data-action-value="' + escHtml(String(pl.id || '')) + '">' +
+        (thumb ? '<img src="' + thumb + '" alt="">' : '<div class="cover-placeholder"></div>') +
+        '<div style="min-width:0"><div class="collect-title">' + escHtml(pl.name || '') + '</div><div class="collect-sub">Navidrome · ' + (pl.trackCount || 0) + ' 首</div></div>' +
+      '</div>';
+    }).join('');
+    if (window.gsap) animateListItems(list, '.collect-item', { x: 0, y: 6, stagger: 0.012, duration: 0.18, limit: 18 });
+    return;
+  }
   if (!loginStatus.loggedIn) {
     list.innerHTML = '<div class="collect-empty">登录后显示你的歌单</div>';
     return;
@@ -14812,21 +14886,39 @@ async function addCollectTargetToPlaylist(pid) {
   updateLikeButtons();
   showToast('正在收藏到歌单...');
   try {
+    var targets = (collectTargetSongs && collectTargetSongs.length ? collectTargetSongs : [collectTargetSong]).filter(Boolean);
     var songId = String(collectTargetSong.id || '');
-    var r = await apiJson('/api/playlist/add-song', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pid: pid, id: songId })
-    });
-    if (!(r && r.success)) throw new Error(collectResultMessage(r));
-    showToast('已收藏到歌单');
+    var isNavidromeCollect = songProviderKey(collectTargetSong) === 'navidrome';
+    var r = isNavidromeCollect
+      ? await apiJson('/api/navidrome/playlist/add-songs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playlistId: pid, songIds: targets.map(function(song){ return song.id; }) })
+        })
+      : await apiJson('/api/playlist/add-song', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid: pid, id: songId })
+        });
+    if (!(r && r.success)) throw new Error(isNavidromeCollect ? (r && (r.error || r.message) || '收藏失败') : collectResultMessage(r));
+    if (isNavidromeCollect) {
+      var addedCount = Number(r.added || 0);
+      var duplicateCount = Number(r.duplicate || 0);
+      if (!addedCount && duplicateCount) showToast(targets.length > 1 ? ('歌曲已在歌单中，跳过 ' + duplicateCount + ' 首') : '歌曲已在歌单中');
+      else if (targets.length > 1) showToast('已收藏 ' + addedCount + ' 首到歌单' + (duplicateCount ? ('，跳过 ' + duplicateCount + ' 首重复') : ''));
+      else showToast('已收藏到歌单');
+    } else {
+      showToast('已收藏到歌单');
+    }
     closeCollectModal();
     refreshUserPlaylists(true);
-    setTimeout(function(){
-      verifySongInPlaylist(pid, songId).then(function(ok){
-        if (!ok) console.warn('collect submitted but verify did not find song yet:', pid, songId);
-      });
-    }, 900);
+    if (!isNavidromeCollect) {
+      setTimeout(function(){
+        verifySongInPlaylist(pid, songId).then(function(ok){
+          if (!ok) console.warn('collect submitted but verify did not find song yet:', pid, songId);
+        });
+      }, 900);
+    }
   } catch (err) {
     showToast(err && err.message ? err.message : '收藏失败');
   } finally {
@@ -17009,19 +17101,26 @@ function scrollPlaylistPanelToCurrent() {
   });
 }
 function switchPlaylistTab(tab) {
-  tab = tab === 'podcasts' ? 'podcasts' : (tab === 'playlists' ? 'playlists' : 'queue');
+  var ndAlbumTabVisible = updateNavidromeAlbumTabVisibility();
+  if (tab === 'navidromeAlbums' && !ndAlbumTabVisible) tab = 'playlists';
+  tab = tab === 'podcasts' ? 'podcasts' : (tab === 'navidromeAlbums' ? 'navidromeAlbums' : (tab === 'playlists' ? 'playlists' : 'queue'));
   queueViewTab = tab;
   document.getElementById('tab-queue').classList.toggle('active', tab === 'queue');
   document.getElementById('tab-pl').classList.toggle('active', tab === 'playlists');
+  var ndAlbumTab = document.getElementById('tab-nd-albums');
+  if (ndAlbumTab) ndAlbumTab.classList.toggle('active', tab === 'navidromeAlbums');
   var podcastTab = document.getElementById('tab-podcast');
   if (podcastTab) podcastTab.classList.toggle('active', tab === 'podcasts');
   document.getElementById('queue-pane').style.display = tab === 'queue' ? '' : 'none';
   document.getElementById('pl-pane').style.display = tab === 'playlists' ? '' : 'none';
   var podcastPane = document.getElementById('podcast-pane');
   if (podcastPane) podcastPane.style.display = tab === 'podcasts' ? '' : 'none';
-  if (tab === 'playlists' || tab === 'podcasts') refreshUserPlaylists();
+  var ndAlbumPane = document.getElementById('nd-album-pane');
+  if (ndAlbumPane) ndAlbumPane.style.display = tab === 'navidromeAlbums' ? '' : 'none';
+  if (tab === 'playlists' || tab === 'podcasts' || tab === 'navidromeAlbums') refreshUserPlaylists();
   if (tab === 'queue') animateVisiblePanelList(document.getElementById('queue-list'), '.queue-item', document.getElementById('playlist-panel'), '.queue-item.now');
   if (tab === 'playlists') animateVisiblePanelList(document.getElementById('pl-list'), '.pl-card', document.getElementById('playlist-panel'));
+  if (tab === 'navidromeAlbums') animateVisiblePanelList(document.getElementById('nd-album-list'), '.pl-card', document.getElementById('playlist-panel'));
   if (tab === 'podcasts') animateVisiblePanelList(document.getElementById('podcast-list'), '.pl-card', document.getElementById('playlist-panel'));
 }
 function setMiniQueueOpen(open) {
@@ -17047,7 +17146,7 @@ function closeMiniQueue() {
   setMiniQueueOpen(false);
 }
 function openPlaylistPanelTab(tab, preserve) {
-  tab = tab === 'podcasts' ? 'podcasts' : (tab === 'playlists' ? 'playlists' : 'queue');
+  tab = tab === 'podcasts' ? 'podcasts' : (tab === 'navidromeAlbums' ? 'navidromeAlbums' : (tab === 'playlists' ? 'playlists' : 'queue'));
   var panel = document.getElementById('playlist-panel');
   if (panel && panel.dataset && preserve !== false) panel.dataset.preserveTabOnOpen = '1';
   switchPlaylistTab(tab);
@@ -17117,21 +17216,31 @@ function renderQueuePanel(opts) {
   renderMiniQueuePanel({ scrollCurrent: miniQueueOpen });
 }
 async function refreshUserPlaylists(force) {
+  updateNavidromeAlbumTabVisibility();
   if (!loginStatus.loggedIn && !qqLoginStatus.loggedIn && !navidromeStatus.loggedIn) {
     resetPlaylistPanelRenderLimit();
+    resetNavidromeAlbumRenderLimit();
+    navidromeAlbums = [];
+    navidromeAlbumsLoaded = false;
     document.getElementById('pl-list').innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">登录后显示个人歌单</div>';
     var podcastListLoggedOut = document.getElementById('podcast-list');
     if (podcastListLoggedOut) podcastListLoggedOut.innerHTML = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.28);font-size:11.5px">登录后显示我的播客</div>';
+    renderNavidromeAlbumsList();
     return;
   }
-  if (force) resetPlaylistPanelRenderLimit();
+  if (force) {
+    resetPlaylistPanelRenderLimit();
+    resetNavidromeAlbumRenderLimit();
+  }
   var hasCachedQQPlaylists = userPlaylists.some(function(pl){ return pl && pl.provider === 'qq'; });
   var hasCachedNavidromePlaylists = userPlaylists.some(function(pl){ return pl && pl.provider === 'navidrome'; });
   var needsQQRefresh = qqLoginStatus.loggedIn && !hasCachedQQPlaylists;
   var needsNavidromeRefresh = navidromeStatus.loggedIn && !hasCachedNavidromePlaylists;
-  if (!force && !needsQQRefresh && !needsNavidromeRefresh && (userPlaylists.length || myPodcastCollections.length)) {
+  var needsNavidromeAlbumRefresh = navidromeStatus.loggedIn && queueViewTab === 'navidromeAlbums' && (force || !navidromeAlbumsLoaded);
+  if (!force && !needsQQRefresh && !needsNavidromeRefresh && !needsNavidromeAlbumRefresh && (userPlaylists.length || myPodcastCollections.length)) {
     var cachedAnimate = isPlaylistPanelVisibleForRender();
     renderUserPlaylistsList({ animate: cachedAnimate });
+    renderNavidromeAlbumsList({ animate: cachedAnimate });
     renderMyPodcastCollections({ animate: cachedAnimate });
     return;
   }
@@ -17147,15 +17256,25 @@ async function refreshUserPlaylists(force) {
       loginStatus.loggedIn ? apiJson('/api/user/playlists') : Promise.resolve({ playlists: [] }),
       loginStatus.loggedIn ? apiJson('/api/podcast/my') : Promise.resolve({ collections: [], loggedIn: false }),
       qqLoginStatus.loggedIn ? apiJson('/api/qq/user/playlists') : Promise.resolve({ playlists: [] }),
-      navidromeStatus.loggedIn ? apiJson('/api/navidrome/playlists') : Promise.resolve({ playlists: [] })
+      navidromeStatus.loggedIn ? apiJson('/api/navidrome/playlists') : Promise.resolve({ playlists: [] }),
+      needsNavidromeAlbumRefresh ? apiJson('/api/navidrome/albums') : Promise.resolve({ albums: navidromeAlbums })
     ]);
     var neteaseLists = (result[0].playlists || []).map(function(pl){ pl.provider = 'netease'; pl.source = 'netease'; return pl; });
     qqPlaylists = (result[2].playlists || []).map(function(pl){ pl.provider = 'qq'; pl.source = 'qq'; return pl; });
     var navidromeLists = (result[3].playlists || []).map(function(pl){ pl.provider = 'navidrome'; pl.source = 'navidrome'; return pl; });
+    if (needsNavidromeAlbumRefresh) {
+      navidromeAlbums = (result[4].albums || []).map(function(pl){ pl.provider = 'navidrome'; pl.source = 'navidrome'; pl.type = 'album'; return pl; });
+      navidromeAlbumsLoaded = true;
+    } else if (!navidromeStatus.loggedIn) {
+      navidromeAlbums = [];
+      navidromeAlbumsLoaded = false;
+    }
     userPlaylists = neteaseLists.concat(qqPlaylists, navidromeLists);
     myPodcastCollections = result[1].collections || [];
     var animatePanel = isPlaylistPanelVisibleForRender();
+    updateNavidromeAlbumTabVisibility();
     renderUserPlaylistsList({ animate: animatePanel, reset: true });
+    renderNavidromeAlbumsList({ animate: animatePanel, reset: true });
     renderMyPodcastCollections({ animate: animatePanel });
     if (emptyHomeActive) renderHomeDiscover();
     scheduleShelfRebuild('refresh-user-playlists', true);
@@ -17189,6 +17308,11 @@ function playlistPanelDetailHtml(pl, provider) {
           imgTag +
           '<div style="flex:1;min-width:0"><div class="pl-detail-row-title">' + escHtml(song.name || '') + '</div>' +
           '<button type="button" class="pl-detail-row-artist" data-pl-detail-artist="' + i + '">' + escHtml(song.artist || '未知歌手') + '</button></div>' +
+          '<div class="qi-act pl-detail-row-act">' +
+            '<button class="' + (isSongLiked(song) ? 'liked' : '') + '" data-stop-propagation="true" data-action="toggleLikePlaylistPanelDetailTrack" data-action-value="' + i + '" title="' + (isSongLiked(song) ? '取消红心' : '红心喜欢') + '">' + heartIconSvg() + '</button>' +
+            '<button class="queue-next" data-stop-propagation="true" data-action="queuePlaylistPanelDetailTrackNext" data-action-value="' + i + '" title="下一首播放">下</button>' +
+            '<button data-stop-propagation="true" data-action="collectPlaylistPanelDetailTrack" data-action-value="' + i + '" title="收藏到歌单">' + playlistPlusIconSvg() + '</button>' +
+          '</div>' +
         '</div>';
       }).join('');
   if (!loading && !rows) rows = '<div style="text-align:center;padding:14px 0;color:rgba(255,255,255,.30);font-size:11.5px">歌单暂无可播放歌曲</div>';
@@ -17207,6 +17331,7 @@ function playlistPanelDetailHtml(pl, provider) {
 }
 function renderPlaylistPanelDetailState() {
   renderUserPlaylistsList();
+  renderNavidromeAlbumsList();
 }
 function scrollPlaylistPanelToTop() {
   var panel = document.getElementById('playlist-panel');
@@ -17237,7 +17362,7 @@ async function openPlaylistPanelDetail(provider, pid, title) {
   if (!pid) return;
   provider = provider === 'navidrome' ? 'navidrome' : (provider === 'qq' ? 'qq' : 'netease');
   var key = playlistPanelKey(provider, pid);
-  var pl = userPlaylists.find(function(item){ return playlistPanelKey(item.provider === 'navidrome' ? 'navidrome' : (item.provider === 'qq' ? 'qq' : 'netease'), item.id) === key; }) || { id: pid, provider: provider, name: title || '歌单详情' };
+  var pl = userPlaylists.concat(navidromeAlbums || []).find(function(item){ return playlistPanelKey(item.provider === 'navidrome' ? 'navidrome' : (item.provider === 'qq' ? 'qq' : 'netease'), item.id) === key; }) || { id: pid, provider: provider, name: title || '歌单详情' };
   if (playlistPanelDetailState.key === key && !playlistPanelDetailState.loading && playlistPanelDetailState.tracks.length) {
     playlistPanelDetailState.key = '';
     playlistPanelDetailState.tracks = [];
@@ -17294,6 +17419,20 @@ function openPlaylistPanelDetailArtist(index) {
   var song = playlistPanelDetailState.tracks && playlistPanelDetailState.tracks[index];
   if (song) openArtistDetailForSong(song);
 }
+function toggleLikePlaylistPanelDetailTrack(index) {
+  var song = playlistPanelDetailState.tracks && playlistPanelDetailState.tracks[index];
+  if (!song) return;
+  toggleLikeSong(song);
+  setTimeout(function(){ renderPlaylistPanelDetailState(); }, 0);
+}
+function queuePlaylistPanelDetailTrackNext(index) {
+  var song = playlistPanelDetailState.tracks && playlistPanelDetailState.tracks[index];
+  if (song) queueDetailSongNext(song);
+}
+function collectPlaylistPanelDetailTrack(index) {
+  var song = playlistPanelDetailState.tracks && playlistPanelDetailState.tracks[index];
+  if (song) openCollectModal(song);
+}
 function growPlaylistPanelDetailRenderLimit(amount) {
   var st = playlistPanelDetailState;
   var total = st && st.tracks ? st.tracks.length : 0;
@@ -17319,6 +17458,9 @@ function maybeGrowPlaylistPanelDetailRenderLimit() {
 function resetPlaylistPanelRenderLimit() {
   playlistPanelRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
 }
+function resetNavidromeAlbumRenderLimit() {
+  navidromeAlbumRenderLimit = PLAYLIST_PANEL_BATCH_SIZE;
+}
 function growPlaylistPanelRenderLimit() {
   if (!userPlaylists.length) return;
   var next = Math.min(userPlaylists.length, (playlistPanelRenderLimit || PLAYLIST_PANEL_BATCH_SIZE) + PLAYLIST_PANEL_BATCH_SIZE);
@@ -17326,15 +17468,51 @@ function growPlaylistPanelRenderLimit() {
   playlistPanelRenderLimit = next;
   renderUserPlaylistsList({ animate: true });
 }
+function growNavidromeAlbumRenderLimit() {
+  if (!navidromeAlbums.length) return;
+  var next = Math.min(navidromeAlbums.length, (navidromeAlbumRenderLimit || PLAYLIST_PANEL_BATCH_SIZE) + PLAYLIST_PANEL_BATCH_SIZE);
+  if (next <= navidromeAlbumRenderLimit) return;
+  navidromeAlbumRenderLimit = next;
+  renderNavidromeAlbumsList({ animate: true });
+}
 function bindPlaylistPanelLazyRender() {
   var panel = document.getElementById('playlist-panel');
   if (!panel || playlistPanelLazyBound) return;
   playlistPanelLazyBound = true;
   panel.addEventListener('scroll', function(){
     maybeGrowPlaylistPanelDetailRenderLimit();
-    if (queueViewTab !== 'playlists' || playlistPanelRenderLimit >= userPlaylists.length) return;
-    if (panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 180) growPlaylistPanelRenderLimit();
+    var nearBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 180;
+    if (queueViewTab === 'playlists' && playlistPanelRenderLimit < userPlaylists.length && nearBottom) growPlaylistPanelRenderLimit();
+    if (queueViewTab === 'navidromeAlbums' && navidromeAlbumRenderLimit < navidromeAlbums.length && nearBottom) growNavidromeAlbumRenderLimit();
   }, { passive: true });
+}
+function updateNavidromeAlbumTabVisibility() {
+  var visible = !!(navidromeStatus && navidromeStatus.loggedIn);
+  var tab = document.getElementById('tab-nd-albums');
+  if (tab) tab.style.display = visible ? '' : 'none';
+  if (!visible && queueViewTab === 'navidromeAlbums') {
+    queueViewTab = 'playlists';
+    if (tab) tab.classList.remove('active');
+    var plTab = document.getElementById('tab-pl');
+    if (plTab) plTab.classList.add('active');
+    var pane = document.getElementById('nd-album-pane');
+    if (pane) pane.style.display = 'none';
+    var plPane = document.getElementById('pl-pane');
+    if (plPane) plPane.style.display = '';
+  }
+  return visible;
+}
+function playlistPanelCardHtml(pl) {
+  var provider = pl.provider === 'navidrome' ? 'navidrome' : (pl.provider === 'qq' ? 'qq' : 'netease');
+  var providerLabel = provider === 'navidrome' ? 'ND' : (provider === 'qq' ? 'QQ' : 'NE');
+  var thumb = pl.cover ? (provider === 'qq' || provider === 'navidrome' ? pl.cover : (pl.cover + '?param=88y88')) : '';
+  var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:44px;height:44px;border-radius:8px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
+  var key = playlistPanelKey(provider, pl.id);
+  var expanded = playlistPanelDetailState.key === key ? ' expanded' : '';
+  return '<div class="pl-card' + expanded + '" data-playlist-provider="' + provider + '" data-playlist-id="' + escHtml(String(pl.id || '')) + '" data-playlist-title="' + escHtml(pl.name || '') + '">' +
+    imgTag +
+    '<div style="flex:1;min-width:0"><div class="pl-name">' + escHtml(pl.name) + '<span class="tag-source ' + provider + '" style="margin-left:6px;vertical-align:1px">' + providerLabel + '</span></div><div class="pl-sub">' + pl.trackCount + ' 首 · ' + escHtml(pl.creator || '') + '</div></div>' +
+  '</div>' + playlistPanelDetailHtml(pl, provider);
 }
 function renderUserPlaylistsList(opts) {
   opts = opts || {};
@@ -17344,22 +17522,10 @@ function renderUserPlaylistsList(opts) {
     $pl.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">未找到歌单</div>';
     return;
   }
-  function playlistCardHtml(pl) {
-    var provider = pl.provider === 'navidrome' ? 'navidrome' : (pl.provider === 'qq' ? 'qq' : 'netease');
-    var providerLabel = provider === 'navidrome' ? 'ND' : (provider === 'qq' ? 'QQ' : 'NE');
-    var thumb = pl.cover ? (provider === 'qq' || provider === 'navidrome' ? pl.cover : (pl.cover + '?param=88y88')) : '';
-    var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:44px;height:44px;border-radius:8px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
-    var key = playlistPanelKey(provider, pl.id);
-    var expanded = playlistPanelDetailState.key === key ? ' expanded' : '';
-    return '<div class="pl-card' + expanded + '" data-playlist-provider="' + provider + '" data-playlist-id="' + escHtml(String(pl.id || '')) + '" data-playlist-title="' + escHtml(pl.name || '') + '">' +
-      imgTag +
-      '<div style="flex:1;min-width:0"><div class="pl-name">' + escHtml(pl.name) + '<span class="tag-source ' + provider + '" style="margin-left:6px;vertical-align:1px">' + providerLabel + '</span></div><div class="pl-sub">' + pl.trackCount + ' 首 · ' + escHtml(pl.creator || '') + '</div></div>' +
-    '</div>' + playlistPanelDetailHtml(pl, provider);
-  }
   var groups = [
     { key:'netease', label:'网易云歌单', items:userPlaylists.filter(function(pl){ return pl.provider !== 'qq' && pl.provider !== 'navidrome'; }) },
     { key:'qq', label:'QQ 音乐歌单', items:userPlaylists.filter(function(pl){ return pl.provider === 'qq'; }) },
-    { key:'navidrome', label:'Navidrome 专辑与曲库', items:userPlaylists.filter(function(pl){ return pl.provider === 'navidrome'; }) }
+    { key:'navidrome', label:'Navidrome 歌单与曲库', items:userPlaylists.filter(function(pl){ return pl.provider === 'navidrome'; }) }
   ];
   if (opts.reset) resetPlaylistPanelRenderLimit();
   playlistPanelRenderLimit = Math.max(PLAYLIST_PANEL_BATCH_SIZE, Math.min(userPlaylists.length, playlistPanelRenderLimit || PLAYLIST_PANEL_BATCH_SIZE));
@@ -17374,12 +17540,34 @@ function renderUserPlaylistsList(opts) {
   $pl.innerHTML = groups.map(function(group){
     var items = visibleGroupItems(group.items);
     if (!items.length) return '';
-    return '<div class="pl-section-label">' + group.label + '</div>' + items.map(playlistCardHtml).join('');
+    return '<div class="pl-section-label">' + group.label + '</div>' + items.map(playlistPanelCardHtml).join('');
   }).join('') || '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">未找到歌单</div>';
   if (userPlaylists.length > renderedCount) {
     $pl.insertAdjacentHTML('beforeend', '<button type="button" class="fx-mini-btn ghost pl-load-more" data-pl-load-more="1">加载更多 ' + renderedCount + '/' + userPlaylists.length + '</button>');
   }
   if (opts.animate && seq === playlistRenderSeq) animateVisiblePanelList($pl, '.pl-card', document.getElementById('playlist-panel'));
+}
+function renderNavidromeAlbumsList(opts) {
+  opts = opts || {};
+  var $list = document.getElementById('nd-album-list');
+  if (!$list) return;
+  updateNavidromeAlbumTabVisibility();
+  if (!navidromeStatus.loggedIn) {
+    $list.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">连接 Navidrome 后显示专辑</div>';
+    return;
+  }
+  if (!navidromeAlbums.length) {
+    $list.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">未找到 Navidrome 专辑</div>';
+    return;
+  }
+  if (opts.reset) resetNavidromeAlbumRenderLimit();
+  navidromeAlbumRenderLimit = Math.max(PLAYLIST_PANEL_BATCH_SIZE, Math.min(navidromeAlbums.length, navidromeAlbumRenderLimit || PLAYLIST_PANEL_BATCH_SIZE));
+  var visible = navidromeAlbums.slice(0, navidromeAlbumRenderLimit);
+  $list.innerHTML = '<div class="pl-section-label">Navidrome 全部专辑</div>' + visible.map(playlistPanelCardHtml).join('');
+  if (navidromeAlbums.length > visible.length) {
+    $list.insertAdjacentHTML('beforeend', '<button type="button" class="fx-mini-btn ghost pl-load-more" data-nd-album-load-more="1">加载更多 ' + visible.length + '/' + navidromeAlbums.length + '</button>');
+  }
+  if (opts.animate) animateVisiblePanelList($list, '.pl-card', document.getElementById('playlist-panel'));
 }
 function renderMyPodcastCollections(opts) {
   opts = opts || {};
@@ -17404,12 +17592,19 @@ function renderMyPodcastCollections(opts) {
   }).join('');
   if (opts.animate) animateVisiblePanelList($pod, '.pl-card', document.getElementById('playlist-panel'));
 }
-document.getElementById('pl-list').addEventListener('click', function(e){
+function handlePlaylistPanelListClick(e) {
   var loadMore = e.target && e.target.closest ? e.target.closest('[data-pl-load-more]') : null;
   if (loadMore) {
     e.preventDefault();
     e.stopPropagation();
     growPlaylistPanelRenderLimit();
+    return;
+  }
+  var albumLoadMore = e.target && e.target.closest ? e.target.closest('[data-nd-album-load-more]') : null;
+  if (albumLoadMore) {
+    e.preventDefault();
+    e.stopPropagation();
+    growNavidromeAlbumRenderLimit();
     return;
   }
   var detailLoadMore = e.target && e.target.closest ? e.target.closest('[data-pl-detail-load-more]') : null;
@@ -17440,6 +17635,7 @@ document.getElementById('pl-list').addEventListener('click', function(e){
     openPlaylistPanelDetailArtist(Number(artist.getAttribute('data-pl-detail-artist')));
     return;
   }
+  if (e.target && e.target.closest && e.target.closest('[data-action]')) return;
   var row = e.target && e.target.closest ? e.target.closest('[data-pl-detail-row]') : null;
   if (row) {
     e.preventDefault();
@@ -17452,7 +17648,10 @@ document.getElementById('pl-list').addEventListener('click', function(e){
   var provider = card.getAttribute('data-playlist-provider') || 'netease';
   var pid = card.getAttribute('data-playlist-id') || '';
   openPlaylistPanelDetail(provider, pid, card.getAttribute('data-playlist-title') || '');
-});
+}
+document.getElementById('pl-list').addEventListener('click', handlePlaylistPanelListClick);
+var navidromeAlbumListEl = document.getElementById('nd-album-list');
+if (navidromeAlbumListEl) navidromeAlbumListEl.addEventListener('click', handlePlaylistPanelListClick);
 var podcastListEl = document.getElementById('podcast-list');
 if (podcastListEl) {
   podcastListEl.addEventListener('click', function(e){
@@ -21559,6 +21758,7 @@ function updateUserModalUi() {
   if (hint) hint.textContent = dualAccountMode
     ? '右上角已切换为双平台并排展示。'
     : '可切换右上角展示的平台；“我两个都要”会并排放两个登录状态。';
+  refreshMediaCacheInfo();
 }
 function showUserModal() {
   if (!hasAnyPlatformLogin()) return showLoginModal();
@@ -21566,6 +21766,35 @@ function showUserModal() {
   openGsapModal(document.getElementById('user-modal'));
 }
 function closeUserModal() { closeGsapModal(document.getElementById('user-modal')); }
+function formatMediaCacheSize(bytes) {
+  bytes = Number(bytes) || 0;
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2).replace(/\.00$/, '') + ' GB';
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '') + ' MB';
+  if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+  return bytes + ' B';
+}
+async function refreshMediaCacheInfo() {
+  var btn = document.getElementById('account-cache-btn');
+  if (!btn) return;
+  try {
+    var info = await apiJson('/api/media-cache/status?t=' + Date.now());
+    btn.textContent = '清理图片/歌词缓存 · ' + formatMediaCacheSize(info && info.size);
+  } catch (e) {
+    btn.textContent = '清理图片/歌词缓存';
+  }
+}
+async function clearMediaCache() {
+  var btn = document.getElementById('account-cache-btn');
+  if (btn) btn.textContent = '正在清理缓存...';
+  try {
+    var info = await apiJson('/api/media-cache/clear', { method: 'POST' });
+    showToast('图片/歌词缓存已清理');
+    if (btn) btn.textContent = '清理图片/歌词缓存 · ' + formatMediaCacheSize(info && info.size);
+  } catch (e) {
+    showToast('缓存清理失败');
+    refreshMediaCacheInfo();
+  }
+}
 function setActiveAccountProvider(provider) {
   provider = provider === 'qq' || provider === 'navidrome' ? provider : 'netease';
   if (!hasPlatformLogin(provider)) {
@@ -21608,9 +21837,13 @@ async function logoutActiveAccount() {
   if (activeAccountProvider === 'navidrome') {
     try { await apiJson('/api/navidrome/logout'); } catch (e) {}
     navidromeStatus = normalizeNavidromeStatus(null);
+    navidromeAlbums = [];
+    navidromeAlbumsLoaded = false;
+    userPlaylists = userPlaylists.filter(function(pl){ return pl.provider !== 'navidrome'; });
     dualAccountMode = false;
     activeAccountProvider = firstLoggedProvider();
     renderUserBtn();
+    refreshUserPlaylists(true);
     if (hasAnyPlatformLogin()) updateUserModalUi();
     else closeUserModal();
     showToast('已断开 Navidrome');
@@ -24823,6 +25056,7 @@ var MINERADIO_DOM_ACTIONS = {
   enableDualAccountView: function() { enableDualAccountView(); },
   openProviderLogin: function(value) { openProviderLogin(value); },
   closeUserModal: function() { closeUserModal(); },
+  clearMediaCache: function() { clearMediaCache(); },
   logoutActiveAccount: function() { logoutActiveAccount(); },
   closeCoverCropModal: function() { closeCoverCropModal(); },
   commitCoverCrop: function() { commitCoverCrop(); },
@@ -24849,6 +25083,8 @@ var MINERADIO_DOM_ACTIONS = {
   toggleLikeNavidromeAlbumTrack: function(value) { toggleLikeNavidromeAlbumTrack(Number(value) || 0); },
   downloadNavidromeAlbumTrack: function(value) { downloadNavidromeAlbumTrack(Number(value) || 0); },
   queueNavidromeAlbumTrackNext: function(value) { queueNavidromeAlbumTrackNext(Number(value) || 0); },
+  appendNavidromeAlbumTrackToQueue: function(value) { appendNavidromeAlbumTrackToQueue(Number(value) || 0); },
+  collectNavidromeAlbumTrack: function(value) { collectNavidromeAlbumTrack(Number(value) || 0); },
   openSearchResultArtist: function(value) { openSearchResultArtist(Number(value) || 0); },
   playSearchResult: function(value) { playSearchResult(Number(value) || 0); },
   toggleLikeSearchResult: function(value) { toggleLikeSearchResult(Number(value) || 0); },
@@ -24864,6 +25100,9 @@ var MINERADIO_DOM_ACTIONS = {
   openQueueArtist: function(value) { openQueueArtist(Number(value) || 0); },
   toggleLikeQueueIndex: function(value) { toggleLikeQueueIndex(Number(value) || 0); },
   collectQueueIndex: function(value) { collectQueueIndex(Number(value) || 0); },
+  toggleLikePlaylistPanelDetailTrack: function(value) { toggleLikePlaylistPanelDetailTrack(Number(value) || 0); },
+  queuePlaylistPanelDetailTrackNext: function(value) { queuePlaylistPanelDetailTrackNext(Number(value) || 0); },
+  collectPlaylistPanelDetailTrack: function(value) { collectPlaylistPanelDetailTrack(Number(value) || 0); },
   collectArtistDetailSong: function(value) { collectArtistDetailSong(Number(value) || 0); },
   queueArtistDetailSongNext: function(value) { queueArtistDetailSongNext(Number(value) || 0); },
   playArtistDetailSong: function(value) { playArtistDetailSong(Number(value) || 0); },
