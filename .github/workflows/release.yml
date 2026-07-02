@@ -30,7 +30,7 @@ jobs:
             artifact_name: mineradio-windows-dist
             checksum_file: SHA256SUMS-windows.txt
           - name: macOS
-            os: macos-15
+            os: macos-14
             build_script: build:mac
             artifact_name: mineradio-macos-dist
             checksum_file: SHA256SUMS-macos.txt
@@ -69,6 +69,7 @@ jobs:
           NODE
 
       - name: Build desktop package
+        if: matrix.platform.name == 'Windows'
         run: npm run ${{ matrix.platform.build_script }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,6 +79,28 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform.name == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.platform.name == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform.name == 'macOS' && env.MACOS_SIGNING_ENABLED == 'true' && 'true' || 'false' }}
+
+      - name: Build desktop package
+        if: matrix.platform.name == 'macOS'
+        shell: bash
+        run: |
+          set +e
+          npm run "${{ matrix.platform.build_script }}" 2>&1 | tee macos-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 120 macos-build.log > macos-build-tail.log
+            msg=$(python3 -c "from pathlib import Path; text=Path('macos-build-tail.log').read_text(errors='replace'); print(text[-6000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A'))")
+            echo "::error title=macOS desktop package failed::$msg"
+            exit "$status"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MACOS_SIGNING_ENABLED == 'true' && 'true' || 'false' }}
 
       - name: Generate checksums
         shell: bash
