@@ -1,180 +1,305 @@
 # Mineradio AI Handoff
 
-这个文件是给后续接管本工作区的 AI 看的。每次完成一个任务后，都要更新本文件的「工作日志」和「未完成事项」，让下一位接手者能快速知道用户偏好、当前状态和最近做过什么。
+这个文件给后续接管本工作区的 AI 使用。当前项目已经从上游 fork 独立出来，在本机 macOS 环境里从 `v1.0.0` 重新起步；不要再按旧 Windows `resources/app` 路径处理。
 
-## 当前权威入口（2026-06-24）
+## 当前权威入口（2026-07-02）
 
-- 当前真实代码/Git 仓库仍是 `E:\桌面\播放器软件\Mineradio\resources\app`。
-- 当前版本是 `v1.1.0` 纯净安装发布线；本轮已从当前可信源码重新生成并发布 `dist/Mineradio-1.1.0-Setup.exe`。
-- GitHub 仓库已公开：`https://github.com/XxHuberrr/Mineradio`
-- `v1.1.0` Release：`https://github.com/XxHuberrr/Mineradio/releases/tag/v1.1.0`
-- GitHub `/releases/latest` 仍返回 `v1.0.10`，这是刻意设置，避免旧版软件内更新到 1.1.0。
-- `v1.0.10` 及更早旧安装包不再信任，需要在 GitHub Release/README/SECURITY 中标记隔离。
-- `v1.1.0` 不提供从 `v1.0.10` 的软件内本地更新，不上传 `latest.yml`，不生成 `v1.0.10 -> v1.1.0` 快速补丁。
-- 新对话优先读 `AGENTS.md`、`docs/PROJECT_MEMORY.md`、`docs/HANDOFF_NEXT_CHAT.md`；涉及安全重建或发布时再读 `docs/SECURITY_REBUILD_2026-06-24.md`。本文件下面包含较早历史记录，不能覆盖上述文件的当前结论。
+- 当前本机真实代码/Git 仓库：`/Users/lvsp/web/Mineradio`
+- 当前工作分支：`main`
+- 当前 fork 远端：`origin git@github.com:lvshp/Mineradio.git`
+- 上游参考远端：`upstream git@github.com:XxHuberrr/Mineradio.git`
+- 当前源码版本：`v1.0.0`
+- 当前 Release：`https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
+- 当前 release workflow：`.github/workflows/release.yml`
+- 当前本地服务默认启动命令：`PORT=3100 HOST=127.0.0.1 node server.js`
+- 当前本地访问地址：`http://127.0.0.1:3100`
+- Navidrome 本机配置文件：`.navidrome.json`，已加入 `.gitignore`，不要提交。
+- 运行缓存目录：`D:\MineradioCache\beatmaps`，在 macOS 工作区里会表现成带反斜杠字符的目录名，已用 `D:*` 忽略，不要提交。
+
+新对话开始处理 Mineradio 时，先确认：
+
+```bash
+pwd
+git status --short --branch
+git remote -v
+node -p "require('./package.json').version"
+```
+
+然后读：
+
+- `AGENTS.md`
+- `docs/PROJECT_MEMORY.md`
+- 涉及玻璃 SVG 质感时读 `docs/GLASS_SVG_TEXTURE.md`
+- 涉及发布时读 `CHANGELOG.md`、`RELEASE.md`、`package.json`、`.github/workflows/release.yml`
+
+注意：`AGENTS.md` 和 `docs/PROJECT_MEMORY.md` 里仍有较多旧 Windows / 上游仓库路径历史，当前以本文件这一节为准。
 
 ## 用户偏好
 
-- 默认用中文沟通，语气直接、清楚、偏实干。
-- 用户希望你主动完成任务，不要只给方案。能本地验证就本地验证。
-- 除非用户明确要求“上传 GitHub / 推送 / push / 发布到 Release”，否则不要直接上传或推送到 GitHub；本地提交也要在最终说明里讲清楚。
-- 用户很在意视觉质感，尤其讨厌“默认白框”“太素”“没设计感”。Mineradio 视觉方向偏黑色、玻璃、舞台、音乐可视化。
-- 做网页、软件界面、安装器时，要优先考虑第一次打开的新用户是否知道软件是干什么的。
-- 发布软件时，不能只上传源码。GitHub Release 通常要包含可运行安装包 exe；但 `v1.1.0` 安全发布例外，不上传 `latest.yml`，避免旧版软件内更新直接拉取。
-- 安装器默认安装目录优先使用 `D:\Mineradio`，并创建桌面快捷方式。
-- 更新逻辑优先轻量快速补丁；完整安装包作为兜底。
-- 搜索结果要尽量优先原唱/官方版本，不希望翻唱排在原唱前面。
-- 感谢名单曾确认：`emily、小天才e宝、应春日、锋将军、軌跡、林中、骊、风痕、花椰菜🥦`。
+- 默认中文沟通，少废话，直接做。
+- 用户通常希望直接实现、验证、能推送就按要求推送，不要只给方案。
+- 代码改完要跑必要检查；发布相关要确认 GitHub Actions / Release 真实状态。
+- 不要随意重写视觉系统，不要动电影视觉系统，除非用户明确点名。
+- UI 审美：精致、暗色、高级、流畅；拒绝廉价渐变、过度透明、错位、闪烁、卡顿。
+- 玻璃质感是敏感区域，当前黄金版本见 `docs/GLASS_SVG_TEXTURE.md`。
+- 后续如果用户说“保留 / 记住 / 这个做得很好 / 以后别忘了”，要追加到 `docs/PROJECT_MEMORY.md`。
 
-## 工作区地图
+## 当前项目结构
 
-- `server.js`：本地 API、网易云代理、搜索、首页数据、更新检查、完整安装包下载、快速补丁应用。
-- `public/index.html`：主界面和大部分前端逻辑，体量很大，修改前先用 `rg` 定位。
-- `desktop/`：Electron 主进程、preload、窗口和系统集成。
-- `build/`：应用图标、NSIS 安装器脚本、安装器视觉资源、after-pack 资源注入。
-- `dist/`：本地构建产物，已被 git 忽略。根部只放当前发布资产。
-- `updates/`：软件运行时更新区，已被 git 忽略。下载和补丁备份分开。
-- `backups/`：人工归档/历史实验备份，已被 git 忽略。不要和 `updates/` 混用。
-- `node_modules/`：依赖目录，通常不要手动整理。
+```text
+/Users/lvsp/web/Mineradio/
+├─ .github/workflows/release.yml  # tag/手动触发自动打包并发布 GitHub Release
+├─ public/
+│  ├─ index.html                  # 主 HTML 壳，现已拆出 CSS/JS
+│  ├─ styles/main.css             # 主样式
+│  ├─ scripts/app.bundle.js       # 构建后的前端 bundle
+│  ├─ scripts/app/                # 拆分后的前端源码
+│  └─ vendor/
+├─ desktop/                       # Electron main/preload
+├─ build/
+│  ├─ build-app-bundle.mjs        # 前端 bundle 构建脚本
+│  ├─ after-pack.js
+│  └─ installer.nsh               # Windows NSIS 安装器脚本
+├─ docs/
+├─ server.js                      # 本地 API、音乐源、Navidrome、更新检查
+├─ dj-analyzer.js                 # 节奏/音频分析
+├─ package.json                   # 版本、脚本、electron-builder 配置
+├─ package-lock.json
+├─ CHANGELOG.md
+├─ RELEASE.md
+├─ AGENTS.md
+└─ AI_HANDOFF.md
+```
 
-## 本地分区约定
+前端已从单文件拆分：
 
-### dist 发布区
+- 改 `public/scripts/app/**` 后必须运行 `npm run build:app`，生成 `public/scripts/app.bundle.js`。
+- `public/index.html` 当前只负责 HTML 结构和引用，不要再把大块 JS/CSS 塞回去。
+- `public/styles/main.css` 是主样式入口。
 
-`dist` 根部只保留当前可发布资产。`v1.1.0` 安全发布只上传安装包、可选 blockmap 和 SHA256，不上传 `latest.yml`：
+## 常用命令
 
-- `Mineradio-<version>-Setup.exe`
-- `Mineradio-<version>-Setup.exe.blockmap`
-- `Mineradio-<from>-to-<to>.patch.json`
+```bash
+npm install
+npm run build:app
+node --check server.js
+find public/scripts/app -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+git diff --check
+PORT=3100 HOST=127.0.0.1 node server.js
+```
 
-其它内容放到：
+构建：
 
-- `dist/_archive/previous-releases/`：旧安装包和旧 blockmap。
-- `dist/_archive/inconsistent-builds/`：和 `latest.yml` 不匹配的构建，保留但不用于发布。
-- `dist/_previews/`：截图、安装器预览、图标预览。
-- `dist/_logs/`：builder debug 等构建日志。
+```bash
+npm run build:win
+npm run build:win:dir
+npm run build:mac
+```
 
-### updates 更新区
+当前本机服务已按用户要求停掉。需要预览时重新启动：
 
-- `updates/downloads/`：运行时下载的完整安装包或更新资产。
-- `updates/backups/patches/`：快速补丁覆盖文件前的备份。
-- `updates/tmp/`：临时文件。
+```bash
+PORT=3100 HOST=127.0.0.1 node server.js
+```
 
-对应代码常量在 `server.js`：
+## 发布流程（当前 fork）
 
-- `UPDATE_WORK_DIR`
-- `UPDATE_DOWNLOAD_DIR`
-- `UPDATE_PATCH_BACKUP_DIR`
+当前 fork 从 `v1.0.0` 重新开始，不沿用上游版本号语义。
 
-### backups 备份区
+普通发布：
 
-- `backups/public-html/`：历史前端实验 HTML。
-- `backups/tool-cache/`：本地工具缓存或历史缓存文件。
+```bash
+npm version x.y.z --no-git-tag-version
+npm run build:app
+node --check server.js
+find public/scripts/app -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+git diff --check
+git add package.json package-lock.json public/scripts/app.bundle.js
+git commit -m "Prepare Mineradio x.y.z release"
+git push origin main
+git tag -a vx.y.z -m "Mineradio vx.y.z"
+git push origin vx.y.z
+```
 
-这个目录是人工归档区，不参与软件更新流程。
+GitHub Actions 会自动：
 
-## 已完成工作日志
+- Windows: 构建 `Mineradio-x.y.z-Setup.exe`
+- macOS: 构建 `Mineradio-x.y.z-x64.dmg/.zip` 和 `Mineradio-x.y.z-arm64.dmg/.zip`
+- 生成 `SHA256SUMS-windows.txt` / `SHA256SUMS-macos.txt`
+- 发布到 `https://github.com/lvshp/Mineradio/releases/tag/vx.y.z`
 
-### 2026-06-24
+也可以手动触发 `.github/workflows/release.yml` 的 `workflow_dispatch`，输入 `tag_name` 重新打包某个 tag。workflow 已设置 `overwrite_files: true`，重跑会覆盖同名资产。
 
-- 将 `E:\Download\默认测试.json` 接入为首次启动默认用户存档和默认视觉参数；新增 `public/default-user-fx-archive.json`，并让没有本地用户存档的新用户自动得到「默认测试」槽位。
-- 更新 `CHANGELOG.md`、`README.md`、`SECURITY.md`、`RELEASE.md`、`docs/SECURITY_REBUILD_2026-06-24.md` 和 `docs/RELEASE_NOTES_v1.1.0.md`，恢复详细日志并写明 `v1.0.10` 旧安装包隔离、`v1.1.0` 纯净安装、不走软件内更新。
-- 已执行 `npm run build:win`，第一次被旧代理 `127.0.0.1:26001` 拦截，切到 `127.0.0.1:10808` 后打包成功。产物：`dist/Mineradio-1.1.0-Setup.exe`、`.blockmap`、`Mineradio-1.1.0-SHA256SUMS.txt`。
-- 已运行 `git diff --check`、`node --check server.js`、前端 5 个内联脚本解析、默认 JSON 解析、Git 跟踪高风险残留检查；Defender 对新安装包和 `win-unpacked` 扫描后 `Get-MpThreatDetection` 查询为空。
-- 已发布 GitHub Release `v1.1.0`，上传安装包、blockmap、SHA256SUMS；未上传 `latest.yml`。已批量给旧 Release（`v1.0.10` 到 `v0.9.9`）追加旧安装包隔离警示。
-- 检查并更新新对话交接：`docs/HANDOFF_NEXT_CHAT.md` 已改为当前 `v1.1.0` 源码安全重建状态。
-- 本轮交接检查开始时工作树为干净：`main...origin/main`；随后仅修改 `AI_HANDOFF.md`、`docs/HANDOFF_NEXT_CHAT.md`、`docs/PROJECT_MEMORY.md`，并新增 `docs/3D_PLAYLIST_SHELF_MEMORY.md`。
-- 已补全 3D 歌单架专项记忆：控制台模式、常驻/静态镜头、详情页层级、歌词避让、右键歌单架抑制底部控制台、不要推倒重做手感等边界写入 `docs/3D_PLAYLIST_SHELF_MEMORY.md`。
-- 项目记忆 `docs/PROJECT_MEMORY.md` 已包含 `2026-06-24 - 1.1.0 安全重建源码优先`，记录不要复用旧感染环境产出的安装包、旧 `dist`、旧 `node_modules` 或临时扫描资料。
-- 安全重建日志在 `docs/SECURITY_REBUILD_2026-06-24.md`，后续安装包发布必须从当前 Git-tracked 源码重新构建并扫描。
+macOS 签名状态：
 
-### 2026-06-18
+- 当前 `v1.0.0` mac 包没有 Apple Developer ID 签名和 notarize，Chrome 下载后可能提示“Mineradio.app 已损坏”。
+- 已在 Release 说明中加入临时打开命令：
 
-- 发布 `v1.0.4` 到 GitHub：`https://github.com/XxHuberrr/Mineradio/releases/tag/v1.0.4`。
-- 本次发布包含安装包 `Mineradio-1.0.4-Setup.exe`、`latest.yml`、blockmap，以及 `1.0.0/1.0.1/1.0.2/1.0.3 -> 1.0.4` 四个快速补丁 JSON。
-- 主要修复：最小化/隐藏时深度低占用但可见失焦不降帧；全屏 3D 视觉画布尺寸同步避免裁切；控制台隐藏残影；控制台玻璃色差滑条；左侧歌单详情分批加载和置顶；沉浸模式恢复左侧歌单栏、3D 歌单架和封面渐变背景。
+```bash
+sudo xattr -rd com.apple.quarantine /Applications/Mineradio.app
+```
 
-### 2026-06-06
+- workflow 已预留正式签名/公证，需要仓库 secrets：
+  - `CSC_LINK`
+  - `CSC_KEY_PASSWORD`
+  - `APPLE_ID`
+  - `APPLE_APP_SPECIFIC_PASSWORD`
+  - `APPLE_TEAM_ID`
 
-- 发布 `v0.9.11`。
-- 修复新用户首次进入未登录时展示不可控外部推荐封面的问题。
-- 未登录首页改为安全 starter 内容，不再拉取公共推荐。
-- 登录弹窗增加“音乐播放器 + 视觉舞台”说明，并提供“先搜索一首歌”路径。
-- 视觉引导改成产品用途导向。
-- 增加完整安装包下载进度：大小、速度、ETA、状态提示。
-- 增加快速补丁通道：`/api/update/patch` 和 `/api/update/patch/status`。
-- 生成并上传 `Mineradio-0.9.10-to-0.9.11.patch.json`。
-- 注意：已经安装的 `0.9.10` 本身没有补丁器，所以从 `0.9.10` 升到 `0.9.11` 仍需完整安装包一次。
+## 当前 Release 资产（v1.0.0）
 
-### 2026-06-07
+Release 地址：
 
-- 重新设计 Windows NSIS 安装器。
-- 加入深色标题栏、品牌页头、安装器侧栏、深色欢迎页。
-- 跳过默认白色安装模式页。
-- 用自定义深色目录页替代默认白色目录页，保留路径输入和 Browse 按钮。
-- 默认安装路径仍优先 `D:\Mineradio`。
-- 重新打包并覆盖 GitHub Release `v0.9.11` 的安装包、blockmap、latest.yml。
-- 提交：`28d3cef Restyle Windows installer`。
+`https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
 
-### 2026-06-08
+主要资产：
 
-- 整理工作区。
-- `dist` 根部恢复为当前发布资产区。
-- 旧安装包移动到 `dist/_archive/previous-releases/`。
-- 安装器预览截图移动到 `dist/_previews/installer-visual-20260607/`。
-- builder debug 文件移动到 `dist/_logs/`。
-- 历史前端实验文件移动到 `backups/public-html/`。
-- 工具缓存文件移动到 `backups/tool-cache/`。
-- 创建 `updates/downloads/`、`updates/backups/patches/`、`updates/tmp/`。
-- `server.js` 更新为下载区和补丁备份区分离。
-- Home 页完成视觉升级：首屏增加唱片、封面套、频谱视觉块，未登录/无封面时的卡片、拼贴和推荐入口都会生成彩色音乐封面占位，减少纯文字和空黑区域。
-- 修正 Home 页矮屏排版：右侧卡片和推荐入口不再叠压，标题不会把“今天想听什么”拆成尴尬换行。
-- 已用本地 Chrome CDP 验证 `1280x720` 和 `390x720` 首屏，无页面级横向溢出；预览截图保留在 `dist/_previews/home-visual-20260608/`。
-- 本次任务没有上传或推送 GitHub，遵守“未明确要求上传就不上传”的新规则。
+- `Mineradio-1.0.0-Setup.exe`
+- `Mineradio-1.0.0-Setup.exe.blockmap`
+- `Mineradio-1.0.0-x64.dmg`
+- `Mineradio-1.0.0-x64.zip`
+- `Mineradio-1.0.0-arm64.dmg`
+- `Mineradio-1.0.0-arm64.zip`
+- `SHA256SUMS-windows.txt`
+- `SHA256SUMS-macos.txt`
+- `latest.yml`
+- `latest-mac.yml`
 
-### 2026-06-10
+## Navidrome 当前实现状态
 
-- 视觉控制台新增“封面清晰度”滑块，用于调节主封面粒子网格密度。
-- 默认保持 `119x119`（约 1.42 万粒子），最高提升到 `183x183`（约 3.35 万粒子），让专辑封面粒子化后更清晰。
-- 调整封面纹理加载逻辑：高清晰度档位会使用 `384/512` 尺寸的封面画布，避免只增加粒子但纹理源仍然偏糊。
-- 清晰度参数会写入本地偏好；当前封面来源会被记录，拖动滑块后当前封面会按新清晰度自动重载。
-- 修复部分封面在提高清晰度后出现割裂线的问题：粒子网格改为奇数尺寸，几何位置保留居中点，封面 UV 改为采样 texel 中心，shader 内对封面/上一张封面/边缘贴图采样做安全夹取，避免采样到纹理边界或偶数网格中心缝。
-- 已用本地 Chrome CDP 验证滑块：默认 `119x119`，拉满 `183x183`，主粒子/溢光粒子共享高密度几何，dataUrl 封面纹理升到 `512x512`，WebGL `glError=0`。
-- 本次任务没有上传或推送 GitHub。
+已完成并提交在 `f898de0 Add Navidrome library integration` 及后续提交中：
 
-### 2026-06-13
+- Navidrome 登录/配置/搜索/播放 URL/封面/音频/下载/红心。
+- 专辑列表走 `getAlbumList2.view?type=alphabeticalByName`，获取全部专辑，不再只取最近添加。
+- 专辑 id 使用 `album:<albumId>`，点专辑时才请求歌曲。
+- 歌手详情页只显示专辑列表，不预加载全部专辑歌曲。
+- 歌手详情有“热门歌曲”“随机播放”按钮，点击后按服务器返回歌曲入队并播放。
+- 专辑详情页包含播放、随机、下一首、加入队列、添加到歌单、下载等按钮；歌曲行有红心、下载、`+`。
+- 3D 歌单架已兼容 Navidrome，playlist id 使用 `navidrome:` 前缀。
+- 歌词优先 Navidrome `getLyricsBySongId` / `getLyrics`，兜底 LRCLIB。
+- LRCLIB 请求尽量带齐 `track_name`、`artist_name`、`album_name`、`duration`。
+- 歌曲封面新增外部兜底：iTunes -> Deezer -> Navidrome 原封面；接口为 `/api/navidrome/song/cover`。
 
-- 用户明确要求上传 GitHub 后，已将 Home 视觉升级、封面清晰度控制、封面粒子割裂线修复和交接说明更新提交并推送到 `origin/main`。
-- 已推送提交：`21f6052 Polish home visuals and cover particles`。
-- 按用户“不能只上传源码，要包含软件 exe”的要求，继续升版本到 `0.9.12` 并重新构建 Windows 安装包。
-- 已生成 `dist/Mineradio-0.9.12-Setup.exe`、`dist/Mineradio-0.9.12-Setup.exe.blockmap`、`dist/latest.yml`。
-- 已生成轻量快速补丁 `dist/Mineradio-0.9.11-to-0.9.12.patch.json`，补丁只覆盖 `package.json`、`package-lock.json`、`public/index.html`，用于已安装 `0.9.11` 的用户快速更新视觉和封面粒子修复。
-- 已创建并核对 GitHub Release `v0.9.12`：`https://github.com/XxHuberrr/Mineradio/releases/tag/v0.9.12`，远端包含安装包、blockmap、`latest.yml` 和 `0.9.11-to-0.9.12` 快速补丁。
-- 本地试做新版开场动画：参考 `ShipSwiftAnimatedLoop` 的霓虹通道分离、光流和切片感，但放弃环形方案，改为横向光刃切入、彩色尾迹、碎片条和黑金控制台背景，主要改动在 `public/index.html`。
-- 已用本地 Chrome/CDP 重播 splash 并截取 `updates/tmp/splash-replay-0700.png`、`updates/tmp/splash-replay-1800.png`、`updates/tmp/splash-replay-2900.png`；本次只是本地试效果，没有上传或推送 GitHub。
-- 用户反馈上一版“不如动画库惊艳”后，继续把 splash 背景从 2D canvas 升级为 WebGL shader：移植 `ShipSwiftAnimatedLoop` 的 `lineWidth / abs(f)` 高亮线场、RGB channel offset、Neon angular wobble 和 Warp 距离场，并保留 2D fallback。新预览截图为 `updates/tmp/splash-webgl3-0700.png`、`updates/tmp/splash-webgl3-1800.png`、`updates/tmp/splash-webgl3-2900.png`；仍未上传或推送 GitHub。
-### 2026-06-14
+关键代码位置：
 
-- 根据用户反馈，移除 splash 中刻意的环形/花瓣式爆点，改为更自然的斜向流线相位同步高光，避免“环形像菊花”的观感。
-- splash 现在不再自动进入 Home：动画跑完后进入 `ready` 状态，显示轻量“点击进入”，用户点击任意位置或按 Enter/空格后才调用 `dismissSplash()`。这样用户可以停留欣赏动画。
-- 已用本地 Chrome/CDP 验证：`updates/tmp/splash-click-ready.png` 显示 6.4 秒后仍停在 splash 且 `className=ready`，`updates/tmp/splash-after-click.png` 显示点击后进入 Home；本次没有上传或推送 GitHub。
-- 用户随后明确要求上传 GitHub：已升级到 `0.9.13`，更新 `CHANGELOG.md` 和 `RELEASE.md`，生成 `dist/Mineradio-0.9.12-to-0.9.13.patch.json` 快速补丁，并重新构建 `dist/Mineradio-0.9.13-Setup.exe`、`dist/Mineradio-0.9.13-Setup.exe.blockmap`、`dist/latest.yml`。
-- 已推送提交 `4d9044a Prepare Mineradio 0.9.13 release` 到 `origin/main`，并创建 GitHub Release `v0.9.13`：`https://github.com/XxHuberrr/Mineradio/releases/tag/v0.9.13`。远端资产包含安装包、blockmap、`latest.yml` 和 `0.9.12-to-0.9.13` 快速补丁。
-- 注意：本机 `gh` 命令曾被失效代理 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:26001` 挡住。使用 GitHub CLI 发布时可在当前命令里临时清空 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 后再执行。
+- `server.js`
+  - Navidrome helpers、`mapNavidromeSong`、`handleNavidromeLyric`
+  - LRCLIB：`fetchLrclibLyrics`
+  - 外部歌曲封面：`fetchExternalSongCover`、`fetchItunesSongCover`、`fetchDeezerSongCover`
+  - 路由：`/api/navidrome/*`
+- `public/scripts/app/services/16-api.js`
+  - Navidrome 前端 API、歌手详情、专辑详情、红心、封面代理白名单
+- `public/scripts/app/visual/13-shelf-3d.js`
+  - 3D 歌单架 provider 识别
+- `public/scripts/app/visual/14-shelf-content.js`
+  - 3D 歌单架详情打开 Navidrome 曲目
+- `public/styles/main.css`
+  - 歌手详情、专辑详情等样式
+
+## 最近工作日志
+
+### 2026-07-02 - fork 从 v1.0.0 重新起步
+
+- 用户说明这是 fork 来的代码，版本号清零，从 `v1.0.0` 重新开始。
+- 已把 `package.json` / `package-lock.json` 从 `1.1.1` 改为 `1.0.0`。
+- 已删除本地从 `upstream` 拉来的旧 `v1.0.0` tag，并在当前提交重新创建 `v1.0.0`。
+- 已推送 `origin/main` 和 `origin v1.0.0`。
+- GitHub Actions 成功构建 Windows/macOS 并发布：
+  - `https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
+
+### 2026-07-02 - GitHub Actions 自动发布
+
+- 新增 `.github/workflows/release.yml`。
+- tag `v*` 自动构建 Windows + macOS 并发布 Release。
+- 后续补充 `workflow_dispatch`，可手动输入 tag 重跑发布。
+- macOS workflow 已预留 Apple 签名/公证 secrets，未配置时继续打未签名包。
+
+### 2026-07-02 - Navidrome 音源支持
+
+- 增加 Navidrome 连接、搜索、专辑、歌手、播放、封面、歌词、下载、红心支持。
+- 歌手详情改为只显示专辑列表，点专辑才加载歌曲，避免打开歌手页很慢。
+- 专辑详情页补齐播放/随机/队列/下载/红心等操作。
+- 3D 歌单架兼容 Navidrome 专辑/歌单。
+- 歌词支持 Navidrome 结构化歌词，并用 LRCLIB 兜底。
+- 歌曲封面支持 iTunes/Deezer 外部兜底，查不到时回落 Navidrome 专辑图。
+
+### 2026-07-02 - 前端模块化拆分
+
+- `public/index.html` 已拆出：
+  - `public/styles/main.css`
+  - `public/scripts/app/**`
+  - `public/scripts/app.bundle.js`
+  - `build/build-app-bundle.mjs`
+- 新增 npm script：`npm run build:app`
+- 后续改前端源码必须重新构建 bundle。
 
 ## 未完成/待确认事项
 
-- `v1.1.0` 发布时不要上传 `latest.yml` 或快速补丁；Release 需要通过 `--latest=false` 或等价 API 避免成为旧版软件内更新通道的 latest。
-- 搜索结果排序仍需要继续优化：例如“日落大道”应优先梁博原唱，“Beauty and a Beat”应优先原唱/官方版本，避免翻唱排第一。
-- 3D 歌单架交互仍需继续优化：悬停展开和点击后可用状态之间要更丝滑，避免用户误以为悬停后可直接使用。
-- Home 页面与后方 3D 歌单架的交互穿透问题需要继续关注。
-- 如果之后修改发布资产，记得同步 GitHub Release、`latest.yml`、blockmap，并检查本地 `dist` 根部资产是否一致。
+- macOS 正式可双击打开需要 Apple Developer ID 签名和 notarize；当前只能用 `xattr` 去隔离属性。
+- `package.json` 里的 `build.publish` / `mineradio.update` 仍指向上游 `XxHuberrr/Mineradio`，但 GitHub Actions 发布到当前 repo `lvshp/Mineradio`。后续如果软件内更新也要走 fork，需要改这里。
+- `AGENTS.md`、`docs/PROJECT_MEMORY.md` 仍有旧 Windows 路径和上游发布记忆；本轮只更新 `AI_HANDOFF.md`，后续最好同步清理。
+- Navidrome 外部歌词/封面依赖社区数据源，不保证每首歌都命中。
+- 外部封面接口会让同一专辑内部分单曲拿到更匹配封面，但公开数据库通常仍以专辑封面为主，不保证每首歌不同。
+- 发布 workflow 目前会上传 `latest.yml` 和 `latest-mac.yml`，这是当前 fork 从 v1.0.0 重新开始后的正常行为。
+
+## 下个 AI 接手事项
+
+### 最高优先级
+
+1. 不要再进入旧 Windows 路径 `E:\桌面\播放器软件\Mineradio\resources\app` 做当前 fork 的开发；当前真实工作区是 `/Users/lvsp/web/Mineradio`。
+2. 不要把上游 `XxHuberrr/Mineradio` 当发布目标；当前 fork 发布目标是 `lvshp/Mineradio`。
+3. 不要把 `.navidrome.json`、`.cookie`、`.qq-cookie`、`D:\MineradioCache\beatmaps` 或任何运行缓存提交。
+4. 改前端拆分源码后必须执行 `npm run build:app`，否则 `public/scripts/app.bundle.js` 不会更新。
+5. 发布或重跑 Release 前，先确认 `package.json` 版本、tag 名和目标仓库一致。
+
+### 当前可继续推进的任务
+
+- 同步清理 `AGENTS.md` 和 `docs/PROJECT_MEMORY.md` 的旧 Windows / 上游路径，改成当前 macOS fork 事实。
+- 如果要让 macOS 用户正常双击打开，配置 Apple Developer ID 签名和 notarize secrets，然后用 workflow 手动重跑 `v1.0.0` 或发布下个 tag。
+- 如果软件内更新也要走 fork，把 `package.json` 里的：
+  - `build.publish.owner/repo`
+  - `mineradio.update.owner/repo`
+  从 `XxHuberrr/Mineradio` 改为 `lvshp/Mineradio`。
+- 如果用户继续反馈 Navidrome：
+  - 先启动本地服务：`PORT=3100 HOST=127.0.0.1 node server.js`
+  - 再用浏览器访问 `http://127.0.0.1:3100`
+  - 常查接口：`/api/navidrome/status`、`/api/navidrome/playlists`、`/api/navidrome/playlist/tracks`、`/api/navidrome/lyric`
+- 如果用户要求发布新版本：
+  - 先 `npm version x.y.z --no-git-tag-version`
+  - 提交并推送 `main`
+  - 再创建并推送 `vx.y.z` tag
+  - 用 `gh run watch` 盯完 Actions
+  - 用 `gh release view vx.y.z --repo lvshp/Mineradio` 确认资产。
+
+### 近期已验证过的命令
+
+```bash
+npm run build:app
+node --check server.js
+find public/scripts/app -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+git diff --check
+```
+
+### 近期易踩坑
+
+- `gh release view` 当前 CLI 没有 `isLatest` JSON 字段，不要用这个字段查询。
+- 本地曾从 `upstream` 拉到旧 `v1.0.0` tag；当前已删除并在当前 fork 提交上重建。以后如果 fetch upstream 又带回同名 tag，发布前必须确认 `git show-ref --tags v1.0.0` 指向当前 fork 预期提交。
+- GitHub Actions 会提示部分 actions 使用 Node 20 deprecated，这是平台警告，不代表构建失败。
+- 当前 macOS Release 包未 notarize，用户截图里“app 已损坏”就是 Gatekeeper 拦截；先用 `xattr` 解决，长期靠 Apple 签名/公证解决。
+- 外部封面和 LRCLIB 都有网络超时与命中率问题；不要把“社区无数据”误判为代码必然错误。
 
 ## 每次任务完成后的固定动作
 
-1. 更新本文件的「已完成工作日志」。
-2. 如果发现新问题，更新「未完成/待确认事项」。
-3. 如果整理了文件，更新「工作区地图」或「本地分区约定」。
-4. 如果改了代码，至少运行相关语法检查或构建检查。
-5. 如果改了安装包或更新逻辑，检查安装包、blockmap、校验文件和 GitHub Release 是否一致；安全发布时特别确认不要误上传 `latest.yml`。
-6. 最后确认 `git status --short`，说明哪些已提交、哪些只是本地忽略产物。
+1. 如果涉及长期状态，更新本文件。
+2. 如果用户明确要求“记住/保留”，更新 `docs/PROJECT_MEMORY.md`。
+3. 改前端源码后运行 `npm run build:app`。
+4. 至少运行：
+
+```bash
+node --check server.js
+find public/scripts/app -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+git diff --check
+```
+
+5. 发布后用 `gh run list` / `gh run watch` / `gh release view` 确认真实结果。
+6. 最后确认 `git status --short --branch`，说明是否已提交/推送。
