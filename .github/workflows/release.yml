@@ -134,11 +134,34 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
+
+      - name: Prepare release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = r"(?ms)^##\s+" + re.escape(tag) + r"\s*\n(?P<body>.*?)(?=^##\s|\Z)"
+          match = re.search(pattern, changelog)
+          body = match.group("body").strip() if match else ""
+          if not body:
+            body = "反正没什么人看，布想写日志了"
+          Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
+          PY
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -148,7 +171,7 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
-          generate_release_notes: true
+          body_path: release-notes.md
           overwrite_files: true
           fail_on_unmatched_files: true
           files: release-assets/*
