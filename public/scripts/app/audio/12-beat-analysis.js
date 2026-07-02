@@ -254,6 +254,7 @@ function beatMapSongKey(song) {
   if (!song) return '';
   if (song.type === 'local' && song.localKey) return 'local:' + song.localKey;
   if (songProviderKey(song) === 'qq') return 'qq:' + (song.mid || song.songmid || song.id || (song.name + '|' + song.artist));
+  if (songProviderKey(song) === 'navidrome') return 'navidrome:' + (song.id || (song.name + '|' + song.artist));
   if (song.id != null && song.id !== '') return 'song:' + song.id;
   return '';
 }
@@ -361,7 +362,14 @@ function normalizeBeatPrefetchState(state) {
 
 async function fetchBeatPrefetchAudioUrl(song) {
   if (!song) return null;
-  var isQQ = songProviderKey(song) === 'qq';
+  var providerKey = songProviderKey(song);
+  var isQQ = providerKey === 'qq';
+  var isNavidrome = providerKey === 'navidrome';
+  if (isNavidrome) {
+    var navidromeData = await apiJson('/api/navidrome/song/url?id=' + encodeURIComponent(song.id || ''));
+    if (!navidromeData || !navidromeData.url || navidromeData.trial) return null;
+    return navidromeData.url;
+  }
   var requestedQuality = normalizePlaybackQuality(playbackQuality);
   if (!isQQ && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
   if (isQQ && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) requestedQuality = qqPlaybackQualityCeiling;

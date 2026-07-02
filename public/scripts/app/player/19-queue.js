@@ -429,6 +429,7 @@ async function playQueueAt(idx, opts) {
     var providerKey = songProviderKey(song);
     var isQQPlayback = providerKey === 'qq';
     var isNavidromePlayback = providerKey === 'navidrome';
+    if (typeof updatePlaybackQualityUi === 'function') updatePlaybackQualityUi();
     var requestedQuality = normalizePlaybackQuality(opts.qualityOverride || playbackQuality);
     if (!isQQPlayback && !isNavidromePlayback && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
     if (isQQPlayback && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) {

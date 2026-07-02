@@ -5,7 +5,7 @@
 ## 新对话先执行
 
 ```powershell
-cd E:\桌面\播放器软件\Mineradio\resources\app
+cd <project-root>
 git status --short --branch
 git log --oneline -5 --decorate
 Get-Content AGENTS.md
@@ -24,18 +24,18 @@ Get-Content RELEASE.md
 
 ## 当前状态
 
-- 当前真实代码/Git 仓库：`E:\桌面\播放器软件\Mineradio\resources\app`
+- 当前真实代码/Git 仓库：项目根目录
 - 当前版本：`v1.1.0`
 - 当前发布策略：纯净安装版，从当前可信源码重新构建；`v1.0.10` 及更早旧安装包需要隔离，不再建议安装或传播。
 - 本次发布不做 `v1.0.10 -> v1.1.0` 软件内本地更新，不上传 `latest.yml`，不生成快速补丁。
 - 安装包样式继续沿用 `docs/INSTALLER_STYLE.md` 的中文极简黑白蓝格式。
-- GitHub 仓库已公开：`https://github.com/XxHuberrr/Mineradio`
-- `v1.1.0` Release：`https://github.com/XxHuberrr/Mineradio/releases/tag/v1.1.0`
+- GitHub 仓库：以当前 `git remote -v` 为准
+- `v1.1.0` Release：以对应仓库的 Release 页面为准
 - GitHub `/releases/latest` 仍返回 `v1.0.10`，这是刻意设置，避免旧版软件内更新到 1.1.0。
 
 ## 本轮重点
 
-- 已将 `E:\Download\默认测试.json` 设为首次启动默认用户存档和软件内默认视觉参数。
+- 已将「默认测试」JSON 快照设为首次启动默认用户存档和软件内默认视觉参数。
 - 新增 `public/default-user-fx-archive.json`，代码中 `PACKAGED_DEFAULT_FX_SNAPSHOT` 与该 JSON 已脚本比对一致。
 - 没有本地 `mineradio-lyric-layout-v1` 时，`readSavedLyricLayout()` 使用 packaged 默认快照；没有本地用户存档 key 时自动创建「默认测试」槽位。
 - 已恢复详细日志和发布说明：`CHANGELOG.md`、`README.md`、`SECURITY.md`、`RELEASE.md`、`docs/SECURITY_REBUILD_2026-06-24.md`、`docs/RELEASE_NOTES_v1.1.0.md`。
@@ -78,8 +78,8 @@ $env:ALL_PROXY='socks5://127.0.0.1:10808'
 
 ## 不要做
 
-- 不要修改旧外层源码目录，只有 `resources\app` 会影响运行版。
-- 不要从 `工作区备份\2026-06-18-workspace-cleanup`、旧 `dist`、旧 `node_modules` 或旧 packaged build 中恢复可执行产物。
+- 不要修改旧外层源码目录；当前源码只以项目根目录为准。
+- 不要从项目根目录外的旧备份、旧 `dist`、旧 `node_modules` 或旧 packaged build 中恢复可执行产物。
 - 不要使用 `git reset --hard` 或 `git checkout --` 回滚用户改动。
 - 不要把 `v1.1.0` 当作 `v1.0.10` 的软件内更新发布。
 - 不要上传 `latest.yml` 或 `v1.0.10 -> v1.1.0` 快速补丁。

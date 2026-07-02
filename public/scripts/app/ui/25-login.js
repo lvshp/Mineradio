@@ -150,6 +150,7 @@ function renderTopAccountPill(provider) {
   '</span>';
 }
 async function refreshLoginStatus(force) {
+  var light = !!(force && typeof force === 'object' && force.light);
   try {
     var info = await apiJson('/api/login/status?t=' + Date.now());
     loginStatusChecked = true;
@@ -160,9 +161,11 @@ async function refreshLoginStatus(force) {
     if (info && info.loggedIn) {
       homeDiscoverState.loaded = false;
       homeDiscoverState.loggedIn = true;
-      refreshUserPlaylists(true);
-      loadHomeDiscover(true);
-      syncLikeStatusForSongs(playQueue.concat(playlist || []));
+      if (!light) {
+        refreshUserPlaylists(true);
+        loadHomeDiscover(true);
+        syncLikeStatusForSongs(playQueue.concat(playlist || []));
+      }
     } else {
       userPlaylists = qqPlaylists.slice();
       myPodcastCollections = [];
@@ -201,7 +204,8 @@ function normalizeQQLoginStatus(info) {
     stale: !!info.stale || !!(info.profileUnavailable && !(info.nickname && info.avatar))
   });
 }
-async function refreshQQLoginStatus() {
+async function refreshQQLoginStatus(opts) {
+  var light = !!(opts && typeof opts === 'object' && opts.light);
   try {
     var info = await apiJson('/api/qq/login/status?t=' + Date.now());
     var prevLogged = !!qqLoginStatus.loggedIn;
@@ -211,7 +215,7 @@ async function refreshQQLoginStatus() {
       qqPlaylists = [];
       userPlaylists = userPlaylists.filter(function(pl){ return pl.provider !== 'qq'; });
       homeDiscoverState.loaded = false;
-    } else if (!userPlaylists.some(function(pl){ return pl && pl.provider === 'qq'; })) {
+    } else if (!light && !userPlaylists.some(function(pl){ return pl && pl.provider === 'qq'; })) {
       homeDiscoverState.loaded = false;
       homeDiscoverState.loggedIn = true;
       loadHomeDiscover(true);

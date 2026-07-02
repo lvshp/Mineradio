@@ -114,12 +114,31 @@ function findOpenPort(startPort) {
   });
 }
 
-function waitForServer(server) {
+function waitForServer(server, timeoutMs = 6500) {
   if (!server || server.listening) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
-    server.once('listening', resolve);
-    server.once('error', reject);
+    let settled = false;
+    let timer = null;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      server.off('listening', onListening);
+      server.off('error', onError);
+    };
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const onListening = () => finish(resolve);
+    const onError = (err) => finish(reject, err);
+    server.once('listening', onListening);
+    server.once('error', onError);
+    timer = setTimeout(() => {
+      if (server.listening) finish(resolve);
+      else finish(reject, new Error('LOCAL_SERVER_START_TIMEOUT'));
+    }, Math.max(1200, timeoutMs));
   });
 }
 
@@ -1327,7 +1346,9 @@ async function createWindow() {
   process.env.PORT = String(port);
   process.env.COOKIE_FILE = path.join(app.getPath('userData'), '.cookie');
   process.env.QQ_COOKIE_FILE = path.join(app.getPath('userData'), '.qq-cookie');
+  process.env.NAVIDROME_CONFIG_FILE = path.join(app.getPath('userData'), '.navidrome.json');
   process.env.MINERADIO_UPDATE_DIR = getUpdateDownloadDir();
+  process.env.MINERADIO_BEAT_CACHE_DIR = path.join(app.getPath('userData'), 'beatmaps');
   try {
     const legacyQQCookie = path.join(__dirname, '..', '.qq-cookie');
     if (fs.existsSync(legacyQQCookie)) {
@@ -1340,8 +1361,13 @@ async function createWindow() {
     console.warn('QQ cookie migration skipped:', e.message);
   }
 
-  localServer = require(path.join(__dirname, '..', 'server.js'));
-  await waitForServer(localServer);
+  try {
+    localServer = require(path.join(__dirname, '..', 'server.js'));
+    await waitForServer(localServer);
+  } catch (e) {
+    console.error('Local server failed to start:', e && e.message ? e.message : e);
+    throw e;
+  }
 
   const initialBounds = getWindowedBounds();
 
@@ -1383,10 +1409,17 @@ async function createWindow() {
     }
   });
 
-  mainWindow.once('ready-to-show', () => {
+  let mainWindowShown = false;
+  const showMainWindow = () => {
+    if (mainWindowShown || !mainWindow || mainWindow.isDestroyed()) return;
+    mainWindowShown = true;
     mainWindow.show();
     sendWindowState(mainWindow);
-  });
+  };
+
+  mainWindow.once('ready-to-show', showMainWindow);
+  mainWindow.webContents.once('dom-ready', () => setTimeout(showMainWindow, 250));
+  setTimeout(showMainWindow, 4500);
 
   mainWindow.on('maximize', () => sendWindowState(mainWindow));
   mainWindow.on('unmaximize', () => sendWindowState(mainWindow));

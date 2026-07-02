@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.1
+
+- 修复 macOS 启动卡住或窗口迟迟不显示的问题：本地服务等待增加超时保护，主窗口增加 `dom-ready` 和超时兜底显示。
+- 优化启动速度：启动阶段只轻量检查登录态，歌单、首页推荐和喜欢状态延迟加载，减少首屏网络阻塞。
+- 修复跨平台节奏缓存路径：macOS 不再使用 Windows 风格缓存路径，Electron 运行时统一放到应用用户数据目录。
+- Navidrome 播放固定使用服务器原始音质，不再跟随全局音质切换；当前曲目为 Navidrome 时音质按钮显示“原始”。
+- 清理旧仓库/旧机器绝对路径，项目文档和更新发布配置改以项目根目录、当前 `origin` 仓库为准。
+
 ## v1.1.1
 
 - P0 installer safety fix: installation now defaults to the first available non-C drive from `D:\Mineradio` through `Z:\Mineradio`; it falls back to `C:\Mineradio` only when no D-Z drive exists.

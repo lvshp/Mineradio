@@ -7532,6 +7532,7 @@ function beatMapSongKey(song) {
   if (!song) return '';
   if (song.type === 'local' && song.localKey) return 'local:' + song.localKey;
   if (songProviderKey(song) === 'qq') return 'qq:' + (song.mid || song.songmid || song.id || (song.name + '|' + song.artist));
+  if (songProviderKey(song) === 'navidrome') return 'navidrome:' + (song.id || (song.name + '|' + song.artist));
   if (song.id != null && song.id !== '') return 'song:' + song.id;
   return '';
 }
@@ -7639,7 +7640,14 @@ function normalizeBeatPrefetchState(state) {
 
 async function fetchBeatPrefetchAudioUrl(song) {
   if (!song) return null;
-  var isQQ = songProviderKey(song) === 'qq';
+  var providerKey = songProviderKey(song);
+  var isQQ = providerKey === 'qq';
+  var isNavidrome = providerKey === 'navidrome';
+  if (isNavidrome) {
+    var navidromeData = await apiJson('/api/navidrome/song/url?id=' + encodeURIComponent(song.id || ''));
+    if (!navidromeData || !navidromeData.url || navidromeData.trial) return null;
+    return navidromeData.url;
+  }
   var requestedQuality = normalizePlaybackQuality(playbackQuality);
   if (!isQQ && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
   if (isQQ && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) requestedQuality = qqPlaybackQualityCeiling;
@@ -12480,6 +12488,7 @@ function playbackBitrateLabel(br) {
 }
 function playbackResolvedQualityText(data) {
   data = data || {};
+  if (data.provider === 'navidrome' || data.level === 'source' || data.quality === 'source') return '原始音质';
   var label = playbackQualityLabel(data.level || data.quality || playbackQuality);
   var br = playbackBitrateLabel(data.br);
   return br ? (label + ' · ' + br) : label;
@@ -12497,19 +12506,23 @@ function savePlaybackQualityPreference() {
 function updatePlaybackQualityUi() {
   var label = document.getElementById('quality-btn-label');
   var btn = document.getElementById('quality-btn');
+  var currentSong = currentIdx >= 0 && currentIdx < playQueue.length ? playQueue[currentIdx] : null;
+  var isNavidromeCurrent = currentSong && songProviderKey(currentSong) === 'navidrome';
   var canUseSvip = hasProviderSvip('netease', loginStatus);
   var displayQuality = playbackQuality === 'jymaster' && !canUseSvip ? 'hires' : playbackQuality;
-  if (label) label.textContent = playbackQualityShortLabel(displayQuality);
-  if (btn) btn.title = playbackQuality === 'jymaster' && !canUseSvip
-    ? '音质: ' + playbackQualityLabel(displayQuality) + ' · 超清母带需网易云 SVIP'
-    : '音质: ' + playbackQualityLabel(displayQuality);
+  if (label) label.textContent = isNavidromeCurrent ? '原始' : playbackQualityShortLabel(displayQuality);
+  if (btn) btn.title = isNavidromeCurrent
+    ? 'Navidrome: 使用服务器原始音质'
+    : (playbackQuality === 'jymaster' && !canUseSvip
+      ? '音质: ' + playbackQualityLabel(displayQuality) + ' · 超清母带需网易云 SVIP'
+      : '音质: ' + playbackQualityLabel(displayQuality));
   document.querySelectorAll('.quality-option').forEach(function(option){
     var q = normalizePlaybackQuality(option.dataset.quality);
-    var locked = option.dataset.svip === '1' && !canUseSvip;
-    option.classList.toggle('active', q === displayQuality);
+    var locked = isNavidromeCurrent || (option.dataset.svip === '1' && !canUseSvip);
+    option.classList.toggle('active', !isNavidromeCurrent && q === displayQuality);
     option.classList.toggle('locked', locked);
     option.disabled = locked;
-    option.title = locked ? '需要网易云 SVIP 账号' : playbackQualityLabel(q);
+    option.title = isNavidromeCurrent ? 'Navidrome 使用服务器原始音质' : (locked ? '需要网易云 SVIP 账号' : playbackQualityLabel(q));
   });
 }
 function setPlaybackQuality(value) {
@@ -12553,6 +12566,11 @@ function applyPlaybackQualityToCurrentTrack(nextQuality) {
 }
 function toggleQualityPanel(e) {
   if (e) e.stopPropagation();
+  var currentSong = currentIdx >= 0 && currentIdx < playQueue.length ? playQueue[currentIdx] : null;
+  if (currentSong && songProviderKey(currentSong) === 'navidrome') {
+    showToast('Navidrome 使用服务器原始音质');
+    return;
+  }
   var wrap = document.getElementById('quality-control');
   if (wrap) wrap.classList.toggle('open');
 }
@@ -16137,6 +16155,7 @@ async function playQueueAt(idx, opts) {
     var providerKey = songProviderKey(song);
     var isQQPlayback = providerKey === 'qq';
     var isNavidromePlayback = providerKey === 'navidrome';
+    if (typeof updatePlaybackQualityUi === 'function') updatePlaybackQualityUi();
     var requestedQuality = normalizePlaybackQuality(opts.qualityOverride || playbackQuality);
     if (!isQQPlayback && !isNavidromePlayback && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
     if (isQQPlayback && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) {
@@ -20998,6 +21017,7 @@ function renderTopAccountPill(provider) {
   '</span>';
 }
 async function refreshLoginStatus(force) {
+  var light = !!(force && typeof force === 'object' && force.light);
   try {
     var info = await apiJson('/api/login/status?t=' + Date.now());
     loginStatusChecked = true;
@@ -21008,9 +21028,11 @@ async function refreshLoginStatus(force) {
     if (info && info.loggedIn) {
       homeDiscoverState.loaded = false;
       homeDiscoverState.loggedIn = true;
-      refreshUserPlaylists(true);
-      loadHomeDiscover(true);
-      syncLikeStatusForSongs(playQueue.concat(playlist || []));
+      if (!light) {
+        refreshUserPlaylists(true);
+        loadHomeDiscover(true);
+        syncLikeStatusForSongs(playQueue.concat(playlist || []));
+      }
     } else {
       userPlaylists = qqPlaylists.slice();
       myPodcastCollections = [];
@@ -21049,7 +21071,8 @@ function normalizeQQLoginStatus(info) {
     stale: !!info.stale || !!(info.profileUnavailable && !(info.nickname && info.avatar))
   });
 }
-async function refreshQQLoginStatus() {
+async function refreshQQLoginStatus(opts) {
+  var light = !!(opts && typeof opts === 'object' && opts.light);
   try {
     var info = await apiJson('/api/qq/login/status?t=' + Date.now());
     var prevLogged = !!qqLoginStatus.loggedIn;
@@ -21059,7 +21082,7 @@ async function refreshQQLoginStatus() {
       qqPlaylists = [];
       userPlaylists = userPlaylists.filter(function(pl){ return pl.provider !== 'qq'; });
       homeDiscoverState.loaded = false;
-    } else if (!userPlaylists.some(function(pl){ return pl && pl.provider === 'qq'; })) {
+    } else if (!light && !userPlaylists.some(function(pl){ return pl && pl.provider === 'qq'; })) {
       homeDiscoverState.loaded = false;
       homeDiscoverState.loggedIn = true;
       loadHomeDiscover(true);
@@ -24331,14 +24354,19 @@ if (fx.floatLayer) createFloatLayer();
 if (fx.particleLyrics) createLyricsParticles();
 if (fx.backCover) createBackCoverLayer();
 initIdleGuideCanvas();
-var startupLoginStatusPromise = Promise.all([refreshLoginStatus(), refreshQQLoginStatus(), refreshNavidromeStatus()]);
+var startupLoginStatusPromise = Promise.all([
+  refreshLoginStatus({ light: true }),
+  refreshQQLoginStatus({ light: true }),
+  refreshNavidromeStatus()
+]);
 startQQLoginStatusAutoRefresh();
 if (startupLoginStatusPromise && startupLoginStatusPromise.then) {
   startupLoginStatusPromise.then(function(){
-    if (hasAnyPlatformLogin()) {
+    if (hasAnyPlatformLogin()) setTimeout(function(){
       refreshUserPlaylists(true);
       loadHomeDiscover(true);
-    }
+      syncLikeStatusForSongs(playQueue.concat(playlist || []));
+    }, 1200);
     if (document.body.classList.contains('splash-active')) return;
     var homeShown = updateEmptyHomeVisibility({ forceLoad: hasAnyPlatformLogin() });
     if (!hasAnyPlatformLogin()) maybeRunStartupLoginGuide('status');

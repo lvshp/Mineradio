@@ -28,14 +28,19 @@ if (fx.floatLayer) createFloatLayer();
 if (fx.particleLyrics) createLyricsParticles();
 if (fx.backCover) createBackCoverLayer();
 initIdleGuideCanvas();
-var startupLoginStatusPromise = Promise.all([refreshLoginStatus(), refreshQQLoginStatus(), refreshNavidromeStatus()]);
+var startupLoginStatusPromise = Promise.all([
+  refreshLoginStatus({ light: true }),
+  refreshQQLoginStatus({ light: true }),
+  refreshNavidromeStatus()
+]);
 startQQLoginStatusAutoRefresh();
 if (startupLoginStatusPromise && startupLoginStatusPromise.then) {
   startupLoginStatusPromise.then(function(){
-    if (hasAnyPlatformLogin()) {
+    if (hasAnyPlatformLogin()) setTimeout(function(){
       refreshUserPlaylists(true);
       loadHomeDiscover(true);
-    }
+      syncLikeStatusForSongs(playQueue.concat(playlist || []));
+    }, 1200);
     if (document.body.classList.contains('splash-active')) return;
     var homeShown = updateEmptyHomeVisibility({ forceLoad: hasAnyPlatformLogin() });
     if (!hasAnyPlatformLogin()) maybeRunStartupLoginGuide('status');

@@ -1,20 +1,20 @@
 # Mineradio AI Handoff
 
-这个文件给后续接管本工作区的 AI 使用。当前项目已经从上游 fork 独立出来，在本机 macOS 环境里从 `v1.0.0` 重新起步；不要再按旧 Windows `resources/app` 路径处理。
+这个文件给后续接管本工作区的 AI 使用。当前项目已经从上游 fork 独立出来，从 `v1.0.0` 重新起步；不要再按旧机器绝对路径处理。
 
 ## 当前权威入口（2026-07-02）
 
-- 当前本机真实代码/Git 仓库：`/Users/lvsp/web/Mineradio`
+- 当前真实代码/Git 仓库：项目根目录，也就是包含 `AI_HANDOFF.md`、`AGENTS.md`、`package.json` 的目录
 - 当前工作分支：`main`
-- 当前 fork 远端：`origin git@github.com:lvshp/Mineradio.git`
-- 上游参考远端：`upstream git@github.com:XxHuberrr/Mineradio.git`
+- 当前 fork 远端：以 `git remote -v` 的 `origin` 为准
+- 上游参考远端：如存在 `upstream`，只作为参考，不作为默认发布目标
 - 当前源码版本：`v1.0.0`
-- 当前 Release：`https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
+- 当前 Release：以当前仓库对应的 `v1.0.0` Release 为准
 - 当前 release workflow：`.github/workflows/release.yml`
 - 当前本地服务默认启动命令：`PORT=3100 HOST=127.0.0.1 node server.js`
 - 当前本地访问地址：`http://127.0.0.1:3100`
 - Navidrome 本机配置文件：`.navidrome.json`，已加入 `.gitignore`，不要提交。
-- 运行缓存目录：`D:\MineradioCache\beatmaps`，在 macOS 工作区里会表现成带反斜杠字符的目录名，已用 `D:*` 忽略，不要提交。
+- 运行缓存目录：项目根目录外的本机缓存目录；`.gitignore` 已忽略常见缓存形态，不要提交。
 
 新对话开始处理 Mineradio 时，先确认：
 
@@ -32,7 +32,7 @@ node -p "require('./package.json').version"
 - 涉及玻璃 SVG 质感时读 `docs/GLASS_SVG_TEXTURE.md`
 - 涉及发布时读 `CHANGELOG.md`、`RELEASE.md`、`package.json`、`.github/workflows/release.yml`
 
-注意：`AGENTS.md` 和 `docs/PROJECT_MEMORY.md` 里仍有较多旧 Windows / 上游仓库路径历史，当前以本文件这一节为准。
+注意：`AGENTS.md` 和 `docs/PROJECT_MEMORY.md` 可能仍保留历史记录，当前工作入口统一以项目根目录和当前 Git 远端为准。
 
 ## 用户偏好
 
@@ -47,7 +47,7 @@ node -p "require('./package.json').version"
 ## 当前项目结构
 
 ```text
-/Users/lvsp/web/Mineradio/
+<project-root>/
 ├─ .github/workflows/release.yml  # tag/手动触发自动打包并发布 GitHub Release
 ├─ public/
 │  ├─ index.html                  # 主 HTML 壳，现已拆出 CSS/JS
@@ -126,7 +126,7 @@ GitHub Actions 会自动：
 - Windows: 构建 `Mineradio-x.y.z-Setup.exe`
 - macOS: 构建 `Mineradio-x.y.z-x64.dmg/.zip` 和 `Mineradio-x.y.z-arm64.dmg/.zip`
 - 生成 `SHA256SUMS-windows.txt` / `SHA256SUMS-macos.txt`
-- 发布到 `https://github.com/lvshp/Mineradio/releases/tag/vx.y.z`
+- 发布到当前 `origin` 仓库的 `vx.y.z` Release
 
 也可以手动触发 `.github/workflows/release.yml` 的 `workflow_dispatch`，输入 `tag_name` 重新打包某个 tag。workflow 已设置 `overwrite_files: true`，重跑会覆盖同名资产。
 
@@ -150,7 +150,7 @@ sudo xattr -rd com.apple.quarantine /Applications/Mineradio.app
 
 Release 地址：
 
-`https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
+当前 `origin` 仓库的 `v1.0.0` Release
 
 主要资产：
 
@@ -205,7 +205,7 @@ Release 地址：
 - 已删除本地从 `upstream` 拉来的旧 `v1.0.0` tag，并在当前提交重新创建 `v1.0.0`。
 - 已推送 `origin/main` 和 `origin v1.0.0`。
 - GitHub Actions 成功构建 Windows/macOS 并发布：
-  - `https://github.com/lvshp/Mineradio/releases/tag/v1.0.0`
+  - 当前 `origin` 仓库的 `v1.0.0` Release
 
 ### 2026-07-02 - GitHub Actions 自动发布
 
@@ -236,8 +236,8 @@ Release 地址：
 ## 未完成/待确认事项
 
 - macOS 正式可双击打开需要 Apple Developer ID 签名和 notarize；当前只能用 `xattr` 去隔离属性。
-- `package.json` 里的 `build.publish` / `mineradio.update` 仍指向上游 `XxHuberrr/Mineradio`，但 GitHub Actions 发布到当前 repo `lvshp/Mineradio`。后续如果软件内更新也要走 fork，需要改这里。
-- `AGENTS.md`、`docs/PROJECT_MEMORY.md` 仍有旧 Windows 路径和上游发布记忆；本轮只更新 `AI_HANDOFF.md`，后续最好同步清理。
+- `package.json` 里的 `build.publish` / `mineradio.update` 可能仍指向上游仓库；后续如果软件内更新也要走当前 fork，需要改这里。
+- `AGENTS.md`、`docs/PROJECT_MEMORY.md` 可能仍有历史发布记忆；当前开发不要按旧绝对路径定位源码。
 - Navidrome 外部歌词/封面依赖社区数据源，不保证每首歌都命中。
 - 外部封面接口会让同一专辑内部分单曲拿到更匹配封面，但公开数据库通常仍以专辑封面为主，不保证每首歌不同。
 - 发布 workflow 目前会上传 `latest.yml` 和 `latest-mac.yml`，这是当前 fork 从 v1.0.0 重新开始后的正常行为。
@@ -246,20 +246,20 @@ Release 地址：
 
 ### 最高优先级
 
-1. 不要再进入旧 Windows 路径 `E:\桌面\播放器软件\Mineradio\resources\app` 做当前 fork 的开发；当前真实工作区是 `/Users/lvsp/web/Mineradio`。
-2. 不要把上游 `XxHuberrr/Mineradio` 当发布目标；当前 fork 发布目标是 `lvshp/Mineradio`。
-3. 不要把 `.navidrome.json`、`.cookie`、`.qq-cookie`、`D:\MineradioCache\beatmaps` 或任何运行缓存提交。
+1. 不要再进入旧机器绝对路径做当前 fork 的开发；当前真实工作区就是项目根目录。
+2. 不要把上游仓库当发布目标；当前 fork 发布目标以 `origin` 为准。
+3. 不要把 `.navidrome.json`、`.cookie`、`.qq-cookie` 或任何运行缓存提交。
 4. 改前端拆分源码后必须执行 `npm run build:app`，否则 `public/scripts/app.bundle.js` 不会更新。
 5. 发布或重跑 Release 前，先确认 `package.json` 版本、tag 名和目标仓库一致。
 
 ### 当前可继续推进的任务
 
-- 同步清理 `AGENTS.md` 和 `docs/PROJECT_MEMORY.md` 的旧 Windows / 上游路径，改成当前 macOS fork 事实。
+- 继续清理历史文档里的旧机器绝对路径，统一改成项目根目录相对路径。
 - 如果要让 macOS 用户正常双击打开，配置 Apple Developer ID 签名和 notarize secrets，然后用 workflow 手动重跑 `v1.0.0` 或发布下个 tag。
 - 如果软件内更新也要走 fork，把 `package.json` 里的：
   - `build.publish.owner/repo`
   - `mineradio.update.owner/repo`
-  从 `XxHuberrr/Mineradio` 改为 `lvshp/Mineradio`。
+  从上游仓库改为当前 `origin` 仓库。
 - 如果用户继续反馈 Navidrome：
   - 先启动本地服务：`PORT=3100 HOST=127.0.0.1 node server.js`
   - 再用浏览器访问 `http://127.0.0.1:3100`
@@ -269,7 +269,7 @@ Release 地址：
   - 提交并推送 `main`
   - 再创建并推送 `vx.y.z` tag
   - 用 `gh run watch` 盯完 Actions
-  - 用 `gh release view vx.y.z --repo lvshp/Mineradio` 确认资产。
+  - 用 `gh release view vx.y.z --repo <origin-owner>/<origin-repo>` 确认资产。
 
 ### 近期已验证过的命令
 

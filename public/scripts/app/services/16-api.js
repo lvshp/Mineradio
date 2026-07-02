@@ -67,6 +67,7 @@ function playbackBitrateLabel(br) {
 }
 function playbackResolvedQualityText(data) {
   data = data || {};
+  if (data.provider === 'navidrome' || data.level === 'source' || data.quality === 'source') return '原始音质';
   var label = playbackQualityLabel(data.level || data.quality || playbackQuality);
   var br = playbackBitrateLabel(data.br);
   return br ? (label + ' · ' + br) : label;
@@ -84,19 +85,23 @@ function savePlaybackQualityPreference() {
 function updatePlaybackQualityUi() {
   var label = document.getElementById('quality-btn-label');
   var btn = document.getElementById('quality-btn');
+  var currentSong = currentIdx >= 0 && currentIdx < playQueue.length ? playQueue[currentIdx] : null;
+  var isNavidromeCurrent = currentSong && songProviderKey(currentSong) === 'navidrome';
   var canUseSvip = hasProviderSvip('netease', loginStatus);
   var displayQuality = playbackQuality === 'jymaster' && !canUseSvip ? 'hires' : playbackQuality;
-  if (label) label.textContent = playbackQualityShortLabel(displayQuality);
-  if (btn) btn.title = playbackQuality === 'jymaster' && !canUseSvip
-    ? '音质: ' + playbackQualityLabel(displayQuality) + ' · 超清母带需网易云 SVIP'
-    : '音质: ' + playbackQualityLabel(displayQuality);
+  if (label) label.textContent = isNavidromeCurrent ? '原始' : playbackQualityShortLabel(displayQuality);
+  if (btn) btn.title = isNavidromeCurrent
+    ? 'Navidrome: 使用服务器原始音质'
+    : (playbackQuality === 'jymaster' && !canUseSvip
+      ? '音质: ' + playbackQualityLabel(displayQuality) + ' · 超清母带需网易云 SVIP'
+      : '音质: ' + playbackQualityLabel(displayQuality));
   document.querySelectorAll('.quality-option').forEach(function(option){
     var q = normalizePlaybackQuality(option.dataset.quality);
-    var locked = option.dataset.svip === '1' && !canUseSvip;
-    option.classList.toggle('active', q === displayQuality);
+    var locked = isNavidromeCurrent || (option.dataset.svip === '1' && !canUseSvip);
+    option.classList.toggle('active', !isNavidromeCurrent && q === displayQuality);
     option.classList.toggle('locked', locked);
     option.disabled = locked;
-    option.title = locked ? '需要网易云 SVIP 账号' : playbackQualityLabel(q);
+    option.title = isNavidromeCurrent ? 'Navidrome 使用服务器原始音质' : (locked ? '需要网易云 SVIP 账号' : playbackQualityLabel(q));
   });
 }
 function setPlaybackQuality(value) {
@@ -140,6 +145,11 @@ function applyPlaybackQualityToCurrentTrack(nextQuality) {
 }
 function toggleQualityPanel(e) {
   if (e) e.stopPropagation();
+  var currentSong = currentIdx >= 0 && currentIdx < playQueue.length ? playQueue[currentIdx] : null;
+  if (currentSong && songProviderKey(currentSong) === 'navidrome') {
+    showToast('Navidrome 使用服务器原始音质');
+    return;
+  }
   var wrap = document.getElementById('quality-control');
   if (wrap) wrap.classList.toggle('open');
 }
