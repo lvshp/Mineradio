@@ -7,6 +7,7 @@
   "main": "desktop/main.js",
   "private": true,
   "scripts": {
+    "build:app": "node build/build-app-bundle.mjs",
     "start": "electron .",
     "build:win": "electron-builder --win nsis",
     "build:win:dir": "electron-builder --win dir"

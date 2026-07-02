@@ -59,6 +59,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const COOKIE_FILE = process.env.COOKIE_FILE || path.join(__dirname, '.cookie');
 const QQ_COOKIE_FILE = process.env.QQ_COOKIE_FILE || path.join(__dirname, '.qq-cookie');
+const NAVIDROME_CONFIG_FILE = process.env.NAVIDROME_CONFIG_FILE || path.join(__dirname, '.navidrome.json');
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
@@ -86,6 +87,7 @@ const WEATHER_DEFAULT_LOCATION = {
 };
 
 const updateDownloadJobs = new Map();
+const externalSongCoverCache = new Map();
 
 function applySystemCertificateAuthorities() {
   try {
@@ -184,6 +186,45 @@ catch (e) { qqCookie = ''; }
 function saveQQCookie(c) {
   qqCookie = normalizeCookieHeader(c) || rawCookieFallback(c);
   try { fs.writeFileSync(QQ_COOKIE_FILE, qqCookie); } catch (e) {}
+}
+
+let navidromeConfig = readNavidromeConfig();
+function readNavidromeConfig() {
+  const envServer = String(process.env.NAVIDROME_URL || '').trim();
+  const envUser = String(process.env.NAVIDROME_USER || process.env.NAVIDROME_USERNAME || '').trim();
+  const envPass = String(process.env.NAVIDROME_PASSWORD || '').trim();
+  const envToken = String(process.env.NAVIDROME_TOKEN || '').trim();
+  const envSalt = String(process.env.NAVIDROME_SALT || '').trim();
+  if (envServer && envUser && (envPass || (envToken && envSalt))) {
+    return normalizeNavidromeConfig({
+      serverUrl: envServer,
+      username: envUser,
+      password: envPass,
+      token: envToken,
+      salt: envSalt,
+      source: 'env',
+    });
+  }
+  try {
+    if (!fs.existsSync(NAVIDROME_CONFIG_FILE)) return {};
+    return normalizeNavidromeConfig(JSON.parse(fs.readFileSync(NAVIDROME_CONFIG_FILE, 'utf8')));
+  } catch (e) {
+    console.warn('[Navidrome] config read failed:', e.message);
+    return {};
+  }
+}
+function saveNavidromeConfig(config) {
+  navidromeConfig = normalizeNavidromeConfig(config || {});
+  try {
+    if (!navidromeConfig.serverUrl || !navidromeConfig.username || (!navidromeConfig.password && !(navidromeConfig.token && navidromeConfig.salt))) {
+      if (fs.existsSync(NAVIDROME_CONFIG_FILE)) fs.unlinkSync(NAVIDROME_CONFIG_FILE);
+      navidromeConfig = {};
+      return;
+    }
+    fs.writeFileSync(NAVIDROME_CONFIG_FILE, JSON.stringify(navidromeConfig, null, 2));
+  } catch (e) {
+    console.warn('[Navidrome] config save failed:', e.message);
+  }
 }
 
 // ---------- 工具 ----------
@@ -1761,7 +1802,7 @@ function requestText(targetUrl, opts, body) {
         resolve(text);
       });
     });
-    req.setTimeout(10000, () => req.destroy(new Error('Request timeout')));
+    req.setTimeout(Math.max(500, Number(opts.timeoutMs) || 10000), () => req.destroy(new Error('Request timeout')));
     req.on('error', reject);
     if (body) req.write(body);
     req.end();
@@ -1777,6 +1818,786 @@ async function requestJson(targetUrl, opts, body) {
     err.cause = e;
     throw err;
   }
+}
+
+function normalizeNavidromeBaseUrl(value) {
+  const raw = String(value || '').trim().replace(/\/+$/, '');
+  if (!raw || !/^https?:\/\//i.test(raw)) return '';
+  return raw;
+}
+function normalizeNavidromeConfig(input) {
+  input = input || {};
+  return {
+    serverUrl: normalizeNavidromeBaseUrl(input.serverUrl || input.url || input.baseUrl),
+    username: String(input.username || input.user || '').trim(),
+    password: String(input.password || '').trim(),
+    token: String(input.token || '').trim(),
+    salt: String(input.salt || '').trim(),
+    source: input.source === 'env' ? 'env' : 'file',
+  };
+}
+function publicNavidromeStatus(extra) {
+  const cfg = normalizeNavidromeConfig(navidromeConfig);
+  const configured = !!(cfg.serverUrl && cfg.username && (cfg.password || (cfg.token && cfg.salt)));
+  return {
+    provider: 'navidrome',
+    configured,
+    loggedIn: configured,
+    serverUrl: configured ? cfg.serverUrl : '',
+    username: configured ? cfg.username : '',
+    nickname: configured ? cfg.username : 'Navidrome',
+    readOnly: configured && cfg.source === 'env',
+    ...(extra || {}),
+  };
+}
+function navidromeAuthParams(cfg) {
+  cfg = normalizeNavidromeConfig(cfg || navidromeConfig);
+  if (!cfg.serverUrl || !cfg.username) throw new Error('NAVIDROME_NOT_CONFIGURED');
+  const params = {
+    u: cfg.username,
+    v: '1.16.1',
+    c: 'Mineradio',
+    f: 'json',
+  };
+  if (cfg.token && cfg.salt) {
+    params.t = cfg.token;
+    params.s = cfg.salt;
+    return params;
+  }
+  if (!cfg.password) throw new Error('NAVIDROME_NOT_CONFIGURED');
+  const salt = crypto.randomBytes(8).toString('hex');
+  params.s = salt;
+  params.t = crypto.createHash('md5').update(cfg.password + salt).digest('hex');
+  return params;
+}
+function navidromeUrl(endpoint, params) {
+  const cfg = normalizeNavidromeConfig(navidromeConfig);
+  if (!cfg.serverUrl) throw new Error('NAVIDROME_NOT_CONFIGURED');
+  const cleanEndpoint = String(endpoint || '').replace(/^\/+/, '');
+  const u = new URL(cfg.serverUrl + '/rest/' + cleanEndpoint);
+  const all = Object.assign({}, navidromeAuthParams(cfg), params || {});
+  Object.keys(all).forEach(key => {
+    if (all[key] !== null && all[key] !== undefined && String(all[key]) !== '') u.searchParams.set(key, String(all[key]));
+  });
+  return u.toString();
+}
+function navidromeResponseBody(data) {
+  return data && (data['subsonic-response'] || data.subsonicResponse || data);
+}
+function navidromeAssertOk(data) {
+  const body = navidromeResponseBody(data);
+  if (!body || body.status === 'ok') return body || {};
+  const errInfo = body.error || {};
+  const err = new Error(errInfo.message || 'NAVIDROME_API_FAILED');
+  err.code = errInfo.code;
+  throw err;
+}
+async function navidromeApi(endpoint, params, opts) {
+  opts = opts || {};
+  const data = await requestJson(navidromeUrl(endpoint, params), {
+    headers: { 'User-Agent': UA },
+    timeoutMs: opts.timeoutMs,
+  });
+  return navidromeAssertOk(data);
+}
+function navidromeArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+function mapNavidromeSong(raw) {
+  raw = raw || {};
+  const id = raw.id || raw.songId || '';
+  const artistId = raw.artistId || '';
+  const coverId = raw.coverArt || raw.id || '';
+  return {
+    provider: 'navidrome',
+    source: 'navidrome',
+    type: 'navidrome',
+    id,
+    name: raw.title || raw.name || '',
+    artist: raw.artist || '',
+    artists: raw.artist ? [{ id: artistId, name: raw.artist }] : [],
+    artistId,
+    album: raw.album || '',
+    albumId: raw.albumId || '',
+    cover: navidromeSongCoverUrl({ id, coverId, title: raw.title || raw.name || '', artist: raw.artist || '', album: raw.album || '', duration: raw.duration || 0 }),
+    duration: raw.duration ? Number(raw.duration) * 1000 : 0,
+    track: raw.track || 0,
+    year: raw.year || '',
+    suffix: raw.suffix || raw.contentType || '',
+    size: Number(raw.size || 0) || 0,
+    starred: !!raw.starred,
+    playable: !!id,
+  };
+}
+function mapNavidromePlaylist(raw) {
+  raw = raw || {};
+  const id = raw.id || '';
+  const coverId = raw.coverArt || '';
+  return {
+    provider: 'navidrome',
+    source: 'navidrome',
+    id,
+    name: raw.name || raw.title || 'Navidrome Playlist',
+    cover: coverId ? ('/api/navidrome/cover?id=' + encodeURIComponent(coverId)) : '',
+    trackCount: Number(raw.songCount || raw.entryCount || raw.duration || 0) || 0,
+    creator: raw.owner || raw.comment || 'Navidrome',
+  };
+}
+function mapNavidromeAlbum(raw) {
+  raw = raw || {};
+  const id = raw.id || '';
+  const coverId = raw.coverArt || id;
+  return {
+    provider: 'navidrome',
+    source: 'navidrome',
+    type: 'album',
+    id: 'album:' + id,
+    albumId: id,
+    name: raw.name || raw.title || 'Navidrome Album',
+    cover: navidromeCoverUrl(coverId),
+    trackCount: Number(raw.songCount || raw.trackCount || 0) || 0,
+    creator: raw.artist || raw.albumArtist || 'Navidrome',
+    year: raw.year || '',
+  };
+}
+async function handleNavidromeAlbums() {
+  const out = [];
+  const seen = new Set();
+  const pageSize = 500;
+  const maxAlbums = Math.max(1, Math.min(10000, Number(process.env.NAVIDROME_MAX_ALBUMS || 10000) || 10000));
+  for (let offset = 0; offset < maxAlbums; offset += pageSize) {
+    const body = await navidromeApi('getAlbumList2.view', {
+      type: 'alphabeticalByName',
+      size: pageSize,
+      offset,
+    });
+    const albums = navidromeArray(body.albumList2 && body.albumList2.album);
+    albums.forEach(album => {
+      const mapped = mapNavidromeAlbum(album);
+      if (!mapped.albumId || seen.has(mapped.albumId)) return;
+      seen.add(mapped.albumId);
+      out.push(mapped);
+    });
+    if (albums.length < pageSize) break;
+  }
+  return out;
+}
+function navidromeCoverUrl(coverId) {
+  return coverId ? ('/api/navidrome/cover?id=' + encodeURIComponent(coverId)) : '';
+}
+function navidromeSongCoverUrl(song) {
+  song = song || {};
+  const coverId = song.coverId || song.coverArt || song.id || '';
+  if (!coverId) return '';
+  const u = new URL('/api/navidrome/song/cover', 'http://127.0.0.1');
+  u.searchParams.set('id', String(song.id || ''));
+  u.searchParams.set('coverId', String(coverId));
+  u.searchParams.set('title', String(song.title || song.name || ''));
+  u.searchParams.set('artist', String(song.artist || ''));
+  u.searchParams.set('album', String(song.album || ''));
+  u.searchParams.set('duration', String(song.duration || 0));
+  return u.pathname + '?' + u.searchParams.toString();
+}
+function navidromeSongCover(raw) {
+  raw = raw || {};
+  return navidromeSongCoverUrl({ id: raw.id || raw.songId || '', coverId: raw.coverArt || raw.id || '', title: raw.title || raw.name || '', artist: raw.artist || '', album: raw.album || '', duration: raw.duration || 0 });
+}
+async function navidromeVirtualPlaylists() {
+  const base = {
+    random: { provider: 'navidrome', source: 'navidrome', id: 'virtual:random', name: '随机曲库', cover: '', trackCount: 0, creator: 'Navidrome 曲库' },
+    starred: { provider: 'navidrome', source: 'navidrome', id: 'virtual:starred', name: '星标歌曲', cover: '', trackCount: 0, creator: 'Navidrome 曲库' },
+  };
+  const [random, starred] = await Promise.allSettled([
+    navidromeApi('getRandomSongs.view', { size: 1 }),
+    navidromeApi('getStarred2.view', {}),
+  ]);
+  if (random.status === 'fulfilled') {
+    const songs = navidromeArray(random.value.randomSongs && random.value.randomSongs.song);
+    base.random.cover = navidromeSongCover(songs[0]);
+    base.random.trackCount = songs.length ? 120 : 0;
+  }
+  if (starred.status === 'fulfilled') {
+    const songs = navidromeArray(starred.value.starred2 && starred.value.starred2.song);
+    base.starred.cover = navidromeSongCover(songs[0]);
+    base.starred.trackCount = songs.length;
+  }
+  return [base.random, base.starred];
+}
+async function handleNavidromeSearch(keywords, limit) {
+  const q = String(keywords || '').trim();
+  if (!q) return [];
+  const body = await navidromeApi('search3.view', {
+    query: q,
+    songCount: Math.max(1, Math.min(50, Number(limit) || 18)),
+    artistCount: 0,
+    albumCount: 0,
+  });
+  const result = body.searchResult3 || body.searchResult || {};
+  return navidromeArray(result.song).map(mapNavidromeSong).filter(song => song.id && song.name);
+}
+async function handleNavidromePlaylists() {
+  const [albums, virtuals, body] = await Promise.all([
+    handleNavidromeAlbums(),
+    navidromeVirtualPlaylists(),
+    navidromeApi('getPlaylists.view', {}),
+  ]);
+  const list = navidromeArray(body.playlists && body.playlists.playlist)
+    .map(mapNavidromePlaylist)
+    .filter(pl => pl.id && pl.name);
+  return albums.concat(virtuals, list);
+}
+async function navidromeSongsFromAlbums(albums, maxSongs) {
+  const out = [];
+  const seen = new Set();
+  const limitedAlbums = navidromeArray(albums).slice(0, 14);
+  const settled = await Promise.allSettled(limitedAlbums.map(album => navidromeApi('getAlbum.view', { id: album && album.id })));
+  settled.forEach(result => {
+    if (result.status !== 'fulfilled') return;
+    const album = result.value && result.value.album || {};
+    navidromeArray(album.song).forEach(raw => {
+      const song = mapNavidromeSong(raw);
+      if (!song.id || seen.has(song.id)) return;
+      seen.add(song.id);
+      out.push(song);
+    });
+  });
+  return out.slice(0, Math.max(1, Math.min(500, Number(maxSongs) || 200)));
+}
+async function navidromeSongsFromArtistAlbums(albums, maxSongs) {
+  const out = [];
+  const seen = new Set();
+  const albumIds = navidromeArray(albums).map(album => album && album.id).filter(Boolean);
+  const limit = Math.max(1, Math.min(500, Number(maxSongs) || 200));
+  for (let i = 0; i < albumIds.length && out.length < limit; i += 6) {
+    const batch = albumIds.slice(i, i + 6);
+    const settled = await Promise.allSettled(batch.map(id => navidromeApi('getAlbum.view', { id })));
+    settled.forEach(result => {
+      if (result.status !== 'fulfilled') return;
+      const album = result.value && result.value.album || {};
+      navidromeArray(album.song).forEach(raw => {
+        const song = mapNavidromeSong(raw);
+        if (!song.id || seen.has(song.id) || out.length >= limit) return;
+        seen.add(song.id);
+        out.push(song);
+      });
+    });
+  }
+  return out;
+}
+async function handleNavidromeArtistDetail(id, name, limit) {
+  id = String(id || '').trim();
+  name = String(name || '').trim();
+  let artistRaw = null;
+  let albumsRaw = [];
+  if (id) {
+    const body = await navidromeApi('getArtist.view', { id });
+    artistRaw = body.artist || null;
+    albumsRaw = navidromeArray(artistRaw && artistRaw.album);
+  }
+  if (!artistRaw && name) {
+    const body = await navidromeApi('search3.view', { query: name, artistCount: 8, albumCount: 0, songCount: 0 });
+    const artists = navidromeArray(body.searchResult3 && body.searchResult3.artist);
+    artistRaw = artists.find(item => normalizeText(item && item.name) === normalizeText(name)) || artists[0] || null;
+    if (artistRaw && artistRaw.id) {
+      const detail = await navidromeApi('getArtist.view', { id: artistRaw.id });
+      artistRaw = Object.assign({}, artistRaw, detail.artist || {});
+      albumsRaw = navidromeArray(artistRaw.album);
+      id = artistRaw.id;
+    }
+  }
+  const artistName = (artistRaw && artistRaw.name) || name || '';
+  const albums = albumsRaw.map(mapNavidromeAlbum).filter(album => album.albumId && album.name);
+  const avatarId = artistRaw && (artistRaw.coverArt || artistRaw.artistImageUrl || (albumsRaw[0] && (albumsRaw[0].coverArt || albumsRaw[0].id)));
+  return {
+    artist: {
+      id: id || (artistRaw && artistRaw.id) || '',
+      name: artistName || '未知歌手',
+      avatar: avatarId && !/^https?:\/\//i.test(String(avatarId)) ? navidromeCoverUrl(avatarId) : (artistRaw && artistRaw.artistImageUrl || ''),
+      albumCount: albums.length,
+      songCount: Number(artistRaw && artistRaw.songCount || 0) || 0,
+    },
+    albums,
+  };
+}
+async function handleNavidromeArtistSongs(id, name, mode, limit) {
+  id = String(id || '').trim();
+  name = String(name || '').trim();
+  mode = mode === 'random' ? 'random' : 'top';
+  const maxSongs = Math.max(10, Math.min(120, Number(limit) || 50));
+  const detail = await handleNavidromeArtistDetail(id, name, 0);
+  const artistName = (detail.artist && detail.artist.name) || name;
+  const albumRefs = (detail.albums || []).map(album => ({ id: album.albumId })).filter(album => album.id);
+  const albumSongs = await navidromeSongsFromArtistAlbums(albumRefs, Math.max(maxSongs, mode === 'random' ? maxSongs * 2 : maxSongs));
+  let songs = [];
+  if (mode === 'top' && artistName) {
+    try {
+      const topBody = await navidromeApi('getTopSongs.view', { artist: artistName, count: maxSongs }, { timeoutMs: 2200 });
+      const albumSongIds = new Set(albumSongs.map(song => song.id));
+      songs = navidromeArray(topBody.topSongs && topBody.topSongs.song)
+        .map(mapNavidromeSong)
+        .filter(song => song.id && (!albumSongIds.size || albumSongIds.has(song.id) || artistNameMatchesServer(artistName, song.artist)));
+    } catch (err) {
+      console.warn('[NavidromeArtistSongs] getTopSongs skipped:', err.message || err);
+    }
+  }
+  if (!songs.length) songs = albumSongs.slice(0, maxSongs);
+  if (mode === 'random') songs = shuffleCopy(albumSongs.length ? albumSongs : songs).slice(0, maxSongs);
+  return { artist: detail.artist, mode, songs: songs.slice(0, maxSongs) };
+}
+async function handleNavidromeStar(id, starred) {
+  id = String(id || '').trim();
+  if (!id) return { provider: 'navidrome', error: 'MISSING_ID', starred: false };
+  const endpoint = starred ? 'star.view' : 'unstar.view';
+  await navidromeApi(endpoint, { id });
+  return { provider: 'navidrome', id, starred: !!starred };
+}
+function normalizeText(text) {
+  return String(text || '').toLowerCase().replace(/[\s·・,，、/\\|&＋+_-]+/g, '').replace(/[()（）\[\]【】"'“”‘’]/g, '');
+}
+function artistNameMatchesServer(expectedName, actualName) {
+  const expected = normalizeText(expectedName);
+  const actual = normalizeText(actualName);
+  return !!expected && !!actual && (expected === actual || expected.indexOf(actual) >= 0 || actual.indexOf(expected) >= 0);
+}
+function shuffleCopy(list) {
+  const arr = navidromeArray(list).slice();
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  }
+  return arr;
+}
+async function handleNavidromePlaylistTracks(id, limit) {
+  id = String(id || '').trim();
+  const maxSongs = Math.max(1, Math.min(500, Number(limit) || 300));
+  if (!id) return { playlist: { provider: 'navidrome', id, name: 'Navidrome', trackCount: 0 }, tracks: [] };
+  if (id.indexOf('album:') === 0) {
+    const albumId = id.slice(6);
+    const body = await navidromeApi('getAlbum.view', { id: albumId });
+    const album = body.album || {};
+    const tracks = navidromeArray(album.song).map(mapNavidromeSong).filter(song => song.id);
+    return { playlist: mapNavidromeAlbum(album), tracks: tracks.slice(0, maxSongs) };
+  }
+  if (id === 'virtual:starred') {
+    const body = await navidromeApi('getStarred2.view', {});
+    const songs = navidromeArray(body.starred2 && body.starred2.song).map(mapNavidromeSong).filter(song => song.id);
+    return { playlist: { provider: 'navidrome', id, name: '星标歌曲', trackCount: songs.length }, tracks: songs.slice(0, maxSongs) };
+  }
+  if (id === 'virtual:random') {
+    const body = await navidromeApi('getRandomSongs.view', { size: Math.min(maxSongs, 120) });
+    const songs = navidromeArray(body.randomSongs && body.randomSongs.song).map(mapNavidromeSong).filter(song => song.id);
+    return { playlist: { provider: 'navidrome', id, name: '随机曲库', trackCount: songs.length }, tracks: songs };
+  }
+  if (id === 'virtual:recent') {
+    const body = await navidromeApi('getAlbumList2.view', { type: 'newest', size: 24, offset: 0 });
+    const albums = navidromeArray(body.albumList2 && body.albumList2.album);
+    const songs = await navidromeSongsFromAlbums(albums, maxSongs);
+    const coverId = albums[0] && (albums[0].coverArt || albums[0].id);
+    return {
+      playlist: {
+        provider: 'navidrome',
+        id,
+        name: '最近添加',
+        cover: coverId ? ('/api/navidrome/cover?id=' + encodeURIComponent(coverId)) : '',
+        trackCount: songs.length,
+      },
+      tracks: songs,
+    };
+  }
+  const body = await navidromeApi('getPlaylist.view', { id });
+  const playlist = body.playlist || {};
+  const tracks = navidromeArray(playlist.entry || playlist.song).map(mapNavidromeSong).filter(song => song.id);
+  const meta = mapNavidromePlaylist(playlist);
+  meta.trackCount = Number(meta.trackCount || tracks.length) || tracks.length;
+  return { playlist: meta, tracks: tracks.slice(0, maxSongs) };
+}
+async function handleNavidromeSongUrl(id) {
+  id = String(id || '').trim();
+  if (!id) return { provider: 'navidrome', url: '', playable: false, error: 'MISSING_ID' };
+  return {
+    provider: 'navidrome',
+    url: '/api/navidrome/audio?id=' + encodeURIComponent(id),
+    playable: true,
+    proxy: true,
+    level: 'source',
+    quality: 'Navidrome',
+  };
+}
+const lrclibCache = new Map();
+function lrcTimestamp(seconds) {
+  seconds = Math.max(0, Number(seconds) || 0);
+  const min = Math.floor(seconds / 60);
+  const sec = Math.floor(seconds % 60);
+  const cs = Math.floor((seconds - Math.floor(seconds)) * 100);
+  return '[' + String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + '.' + String(cs).padStart(2, '0') + ']';
+}
+function hasLrcTimestamps(text) {
+  return /\[\d{1,2}:\d{1,2}(?:\.\d{1,3})?\]/.test(String(text || ''));
+}
+function plainLyricsToTimedLrc(text, duration) {
+  const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  const total = Math.max(lines.length * 3.2, Math.min(900, Number(duration) || 0));
+  const gap = total ? Math.max(2.8, Math.min(7.2, total / lines.length)) : 4.8;
+  return lines.map((line, i) => lrcTimestamp(i * gap) + line).join('\n');
+}
+function normalizeLrcCandidate(text, duration) {
+  text = String(text || '').trim();
+  if (!text) return '';
+  if (hasLrcTimestamps(text)) return text;
+  return plainLyricsToTimedLrc(text, duration);
+}
+function compactMetaText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s*[-–—]\s*(live|remaster(?:ed)?|explicit|clean|radio edit|single version|album version).*$/i, '')
+    .replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]|【[^】]*】/g, '')
+    .replace(/[\s·・,，、/\\|&＋+_'".:：;；!?！？-]+/g, '');
+}
+function externalCoverCacheKey(meta) {
+  return [meta.title, meta.artist, meta.album, Math.round(Number(meta.duration) || 0)]
+    .map(value => String(value || '').trim().toLowerCase())
+    .join('|');
+}
+function pruneExternalSongCoverCache() {
+  if (externalSongCoverCache.size <= 480) return;
+  const keys = Array.from(externalSongCoverCache.keys());
+  keys.slice(0, Math.max(1, keys.length - 360)).forEach(key => externalSongCoverCache.delete(key));
+}
+function songCoverScore(item, meta) {
+  item = item || {};
+  const title = item.trackName || item.title || item.name || '';
+  const artist = item.artistName || item.artist || '';
+  const album = item.collectionName || item.albumName || item.album || '';
+  const titleA = compactMetaText(title);
+  const titleB = compactMetaText(meta.title);
+  const artistA = compactMetaText(artist);
+  const artistB = compactMetaText(meta.artist);
+  let score = 0;
+  if (titleA && titleA === titleB) score += 6;
+  else if (titleA && titleB && (titleA.includes(titleB) || titleB.includes(titleA))) score += 3;
+  if (artistA && artistA === artistB) score += 5;
+  else if (artistA && artistB && (artistA.includes(artistB) || artistB.includes(artistA))) score += 2;
+  if (meta.album && compactMetaText(album) === compactMetaText(meta.album)) score += 3;
+  const dur = Number(item.trackTimeMillis ? item.trackTimeMillis / 1000 : item.duration) || 0;
+  const expected = Number(meta.duration) || 0;
+  if (dur && expected) score += Math.max(0, 3 - Math.abs(dur - expected));
+  return score;
+}
+function upgradeItunesArtwork(url) {
+  return String(url || '').replace(/\/\d+x\d+bb\.(jpg|png|webp)$/i, '/1000x1000bb.$1');
+}
+async function fetchItunesSongCover(meta) {
+  const term = [meta.title, meta.artist, meta.album].filter(Boolean).join(' ');
+  if (!term) return null;
+  const u = new URL('https://itunes.apple.com/search');
+  u.searchParams.set('term', term);
+  u.searchParams.set('media', 'music');
+  u.searchParams.set('entity', 'song');
+  u.searchParams.set('limit', '8');
+  u.searchParams.set('country', process.env.MINERADIO_ITUNES_COUNTRY || 'CN');
+  const body = await requestJson(u.toString(), { headers: { 'User-Agent': UA }, timeoutMs: 2200 });
+  const list = Array.isArray(body && body.results) ? body.results : [];
+  const best = list
+    .filter(item => item && item.artworkUrl100)
+    .map(item => ({ item, score: songCoverScore(item, meta) }))
+    .sort((a, b) => b.score - a.score)[0];
+  return best && best.score >= 8 ? upgradeItunesArtwork(best.item.artworkUrl100) : null;
+}
+async function fetchDeezerSongCover(meta) {
+  const term = [meta.artist, meta.title, meta.album].filter(Boolean).join(' ');
+  if (!term) return null;
+  const u = new URL('https://api.deezer.com/search/track');
+  u.searchParams.set('q', term);
+  u.searchParams.set('limit', '8');
+  const body = await requestJson(u.toString(), { headers: { 'User-Agent': UA }, timeoutMs: 2600 });
+  const list = Array.isArray(body && body.data) ? body.data : [];
+  const best = list
+    .filter(item => item && item.album && (item.album.cover_xl || item.album.cover_big || item.album.cover_medium))
+    .map(item => ({
+      item,
+      score: songCoverScore({
+        trackName: item.title,
+        artistName: item.artist && item.artist.name,
+        albumName: item.album && item.album.title,
+        duration: item.duration,
+      }, meta),
+    }))
+    .sort((a, b) => b.score - a.score)[0];
+  if (!best || best.score < 8) return null;
+  return best.item.album.cover_xl || best.item.album.cover_big || best.item.album.cover_medium || null;
+}
+async function fetchExternalSongCover(meta) {
+  meta = {
+    title: String(meta && meta.title || '').trim(),
+    artist: String(meta && meta.artist || '').trim(),
+    album: String(meta && meta.album || '').trim(),
+    duration: Math.round(Number(meta && meta.duration) || 0),
+  };
+  if (!meta.title || !meta.artist) return null;
+  const cacheKey = externalCoverCacheKey(meta);
+  if (externalSongCoverCache.has(cacheKey)) return externalSongCoverCache.get(cacheKey);
+  let found = null;
+  try {
+    found = await fetchItunesSongCover(meta);
+  } catch (err) {
+    console.warn('[ExternalCover] iTunes lookup failed:', err.message || err);
+  }
+  if (!found) {
+    try {
+      found = await fetchDeezerSongCover(meta);
+    } catch (err) {
+      console.warn('[ExternalCover] Deezer lookup failed:', err.message || err);
+    }
+  }
+  externalSongCoverCache.set(cacheKey, found || null);
+  pruneExternalSongCoverCache();
+  return found || null;
+}
+function lrclibCacheKey(meta) {
+  return [meta.trackName, meta.artistName, meta.albumName, Math.round(Number(meta.duration) || 0)]
+    .map(value => String(value || '').trim().toLowerCase())
+    .join('|');
+}
+function lrclibTrackScore(item, meta) {
+  function norm(value) {
+    return String(value || '').toLowerCase().replace(/[\s·・,，、/\\|&＋+_-]+/g, '').replace(/[()（）\[\]【】"'“”‘’]/g, '');
+  }
+  let score = 0;
+  if (norm(item.trackName || item.name) === norm(meta.trackName)) score += 5;
+  if (norm(item.artistName) === norm(meta.artistName)) score += 4;
+  if (meta.albumName && norm(item.albumName) === norm(meta.albumName)) score += 2;
+  const dur = Number(item.duration) || 0;
+  const expected = Number(meta.duration) || 0;
+  if (dur && expected) score += Math.max(0, 3 - Math.abs(dur - expected));
+  if (item.syncedLyrics) score += 2;
+  return score;
+}
+async function fetchLrclibLyrics(meta) {
+  meta = {
+    trackName: String(meta && meta.trackName || '').trim(),
+    artistName: String(meta && meta.artistName || '').trim(),
+    albumName: String(meta && meta.albumName || '').trim(),
+    duration: Math.round(Number(meta && meta.duration) || 0),
+  };
+  if (!meta.trackName || !meta.artistName) return null;
+  const cacheKey = lrclibCacheKey(meta);
+  if (lrclibCache.has(cacheKey)) return lrclibCache.get(cacheKey);
+  const headers = { 'User-Agent': 'Mineradio/1.1.1 (https://github.com/XxHuberrr/Mineradio)' };
+  function buildUrl(path, params) {
+    const u = new URL('https://lrclib.net' + path);
+    Object.keys(params).forEach(key => {
+      if (params[key] !== null && params[key] !== undefined && String(params[key]).trim() !== '') {
+        u.searchParams.set(key, String(params[key]));
+      }
+    });
+    return u.toString();
+  }
+  let picked = null;
+  try {
+    picked = await requestJson(buildUrl('/api/get', {
+      track_name: meta.trackName,
+      artist_name: meta.artistName,
+      album_name: meta.albumName,
+      duration: meta.duration || '',
+    }), { headers, timeoutMs: 5500 });
+  } catch (err) {
+    if (!/404|TrackNotFound|not.?found/i.test(String(err.message || '') + ' ' + String(err.body || ''))) {
+      console.warn('[LRCLIB] exact lookup failed:', err.message || err);
+    }
+  }
+  if (!picked || picked.error || picked.statusCode >= 400) {
+    try {
+      const results = await requestJson(buildUrl('/api/search', {
+        track_name: meta.trackName,
+        artist_name: meta.artistName,
+        album_name: meta.albumName,
+        duration: meta.duration || '',
+      }), { headers, timeoutMs: 6500 });
+      const list = Array.isArray(results) ? results : [];
+      picked = list
+        .map(item => ({ item, score: lrclibTrackScore(item, meta) }))
+        .sort((a, b) => b.score - a.score)[0];
+      picked = picked && picked.score >= 6 ? picked.item : null;
+    } catch (err) {
+      console.warn('[LRCLIB] search failed:', err.message || err);
+    }
+  }
+  const lyric = picked && (picked.syncedLyrics || normalizeLrcCandidate(picked.plainLyrics, meta.duration));
+  const result = lyric ? {
+    provider: 'lrclib',
+    lyric,
+    source: picked.syncedLyrics ? 'lrclib-synced' : 'lrclib-plain',
+    trackId: picked.id || '',
+  } : null;
+  lrclibCache.set(cacheKey, result);
+  if (lrclibCache.size > 240) {
+    const firstKey = lrclibCache.keys().next().value;
+    lrclibCache.delete(firstKey);
+  }
+  return result;
+}
+async function handleNavidromeLyric(id) {
+  id = String(id || '').trim();
+  if (!id) return { provider: 'navidrome', lyric: '', error: 'MISSING_ID' };
+  function structuredLyricsText(payload) {
+    const root = payload && (payload.lyricsList || payload.lyrics || payload);
+    const structured = root && (root.structuredLyrics || root.syncedLyrics || root.lyrics || root);
+    const items = navidromeArray(structured);
+    const synced = items.find(item => item && item.synced && (item.line || item.value || item.lines));
+    const plain = items.find(item => item && (item.line || item.value || item.lines));
+    const picked = synced || plain || {};
+    const lines = navidromeArray(picked.line || picked.lines || picked.value);
+    return lines.map(line => {
+      if (typeof line === 'string') return line;
+      const text = line.value || line.text || '';
+      const rawStart = line.start != null ? line.start : (line.startTime != null ? line.startTime : line.time);
+      let start = Number(rawStart);
+      if (rawStart == null || !Number.isFinite(start) || start < 0) return text;
+      if (start > 1000) start /= 1000;
+      const min = Math.floor(start / 60);
+      const sec = Math.floor(start % 60);
+      const ms = Math.floor((start - Math.floor(start)) * 100);
+      return '[' + String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + '.' + String(ms).padStart(2, '0') + ']' + text;
+    }).filter(Boolean).join('\n');
+  }
+  function legacyLyricsText(payload) {
+    const raw = payload && payload.lyrics;
+    if (!raw) return '';
+    if (typeof raw === 'string') return raw;
+    if (typeof raw.value === 'string') return raw.value;
+    if (typeof raw.lyric === 'string') return raw.lyric;
+    if (Array.isArray(raw.line)) return raw.line.map(line => typeof line === 'string' ? line : (line && (line.value || line.text) || '')).filter(Boolean).join('\n');
+    return '';
+  }
+  try {
+    const body = await navidromeApi('getLyricsBySongId.view', { id });
+    const lyricText = structuredLyricsText(body);
+    if (lyricText) return { provider: 'navidrome', lyric: lyricText, source: 'navidrome-songid' };
+  } catch (err) {
+    if (!/not.?found|404|70/i.test(String(err.message || err.code || ''))) {
+      console.warn('[NavidromeLyric] getLyricsBySongId failed:', err.message || err);
+    }
+  }
+  let song = {};
+  try {
+    const songBody = await navidromeApi('getSong.view', { id });
+    song = songBody.song || {};
+    const artist = song.artist || '';
+    const title = song.title || song.name || '';
+    const album = song.album || '';
+    const duration = Number(song.duration) || 0;
+    let navidromePlain = '';
+    if (artist || title) {
+      const legacyBody = await navidromeApi('getLyrics.view', { artist, title });
+      navidromePlain = legacyLyricsText(legacyBody);
+      if (hasLrcTimestamps(navidromePlain)) return { provider: 'navidrome', lyric: navidromePlain, source: 'navidrome-title' };
+    }
+    const lrclib = await fetchLrclibLyrics({
+      trackName: title,
+      artistName: artist,
+      albumName: album,
+      duration,
+    });
+    if (lrclib && lrclib.lyric) return lrclib;
+    const timedPlain = normalizeLrcCandidate(navidromePlain, duration);
+    if (timedPlain) {
+      return { provider: 'navidrome', lyric: timedPlain, source: hasLrcTimestamps(navidromePlain) ? 'navidrome-title' : 'navidrome-title-plain' };
+    }
+  } catch (err) {
+    if (!/not.?found|404|70/i.test(String(err.message || err.code || ''))) {
+      console.warn('[NavidromeLyric] getLyrics fallback failed:', err.message || err);
+    }
+  }
+  if (song && (song.title || song.artist)) {
+    const lrclib = await fetchLrclibLyrics({
+      trackName: song.title || song.name || '',
+      artistName: song.artist || '',
+      albumName: song.album || '',
+      duration: Number(song.duration) || 0,
+    });
+    if (lrclib && lrclib.lyric) return lrclib;
+  }
+  return { provider: 'navidrome', lyric: '', source: 'navidrome-empty' };
+}
+async function proxyNavidromeMedia(res, endpoint, id, fallbackType, cacheControl, req) {
+  id = String(id || '').trim();
+  if (!id) { res.writeHead(400); res.end('Missing id'); return; }
+  try {
+    const upstreamUrl = navidromeUrl(endpoint, { id });
+    const headers = { 'User-Agent': UA };
+    if (req && req.headers && req.headers.range) headers.Range = req.headers.range;
+    const up = await fetch(upstreamUrl, { headers });
+    const out = {
+      'Content-Type': up.headers.get('content-type') || fallbackType,
+      'Access-Control-Allow-Origin': '*',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
+      'Cache-Control': cacheControl || 'no-store',
+    };
+    ['content-length', 'content-range', 'accept-ranges'].forEach(name => {
+      const value = up.headers.get(name);
+      if (value) out[name.replace(/(^|-)./g, s => s.toUpperCase())] = value;
+    });
+    if (!out['Accept-Ranges']) out['Accept-Ranges'] = 'bytes';
+    res.writeHead(up.status, out);
+    const reader = up.body.getReader();
+    while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
+    res.end();
+  } catch (err) {
+    console.error('[NavidromeProxy]', err);
+    res.writeHead(500);
+    res.end();
+  }
+}
+async function fetchWithTimeout(targetUrl, opts, timeoutMs) {
+  opts = opts || {};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(500, Number(timeoutMs) || 8000));
+  try {
+    return await fetch(targetUrl, Object.assign({}, opts, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function proxyExternalImageOrNavidrome(res, req, meta) {
+  meta = meta || {};
+  const coverId = String(meta.coverId || meta.id || '').trim();
+  let externalUrl = '';
+  try {
+    externalUrl = await fetchExternalSongCover(meta);
+  } catch (err) {
+    console.warn('[ExternalCover] lookup skipped:', err.message || err);
+  }
+  if (externalUrl) {
+    try {
+      const up = await fetchWithTimeout(externalUrl, {
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+      }, 6000);
+      const ct = up.headers.get('content-type') || 'image/jpeg';
+      if (up.ok && /^image\//i.test(ct)) {
+        const hdr = {
+          'Content-Type': ct,
+          'Access-Control-Allow-Origin': '*',
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+          'Cache-Control': 'public, max-age=604800',
+        };
+        const cl = up.headers.get('content-length');
+        if (cl) hdr['Content-Length'] = cl;
+        res.writeHead(up.status, hdr);
+        const reader = up.body.getReader();
+        while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
+        res.end();
+        return;
+      }
+    } catch (err) {
+      console.warn('[ExternalCover] image proxy failed:', err.message || err);
+    }
+  }
+  await proxyNavidromeMedia(res, 'getCoverArt.view', coverId, 'image/jpeg', 'public, max-age=86400', req);
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -3409,6 +4230,177 @@ const server = http.createServer(async (req, res) => {
       console.error('[WeatherIpLocation]', err);
       sendJSON(res, { ok: false, error: err.message, location: null }, 500);
     }
+    return;
+  }
+
+  if (pn === '/api/navidrome/status') {
+    try {
+      if (publicNavidromeStatus().configured && url.searchParams.get('ping') === '1') {
+        await navidromeApi('ping.view', {});
+      }
+      sendJSON(res, publicNavidromeStatus());
+    } catch (err) {
+      sendJSON(res, publicNavidromeStatus({ loggedIn: false, error: err.message || 'NAVIDROME_PING_FAILED' }), 200);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/config') {
+    if (req.method !== 'POST') {
+      sendJSON(res, publicNavidromeStatus(), 200);
+      return;
+    }
+    try {
+      if (publicNavidromeStatus().readOnly) {
+        sendJSON(res, publicNavidromeStatus({ error: 'NAVIDROME_CONFIG_FROM_ENV' }), 409);
+        return;
+      }
+      const body = await readRequestBody(req);
+      const next = normalizeNavidromeConfig(body);
+      if (!next.serverUrl || !next.username || (!next.password && !(next.token && next.salt))) {
+        sendJSON(res, { provider: 'navidrome', configured: false, loggedIn: false, error: 'INVALID_NAVIDROME_CONFIG', message: '需要填写服务器地址、用户名和密码' }, 400);
+        return;
+      }
+      navidromeConfig = next;
+      await navidromeApi('ping.view', {});
+      saveNavidromeConfig(next);
+      sendJSON(res, publicNavidromeStatus({ saved: true }));
+    } catch (err) {
+      navidromeConfig = readNavidromeConfig();
+      console.error('[NavidromeConfig]', err);
+      sendJSON(res, { provider: 'navidrome', configured: false, loggedIn: false, error: err.message || 'NAVIDROME_CONFIG_FAILED' }, 400);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/logout') {
+    if (!publicNavidromeStatus().readOnly) saveNavidromeConfig({});
+    sendJSON(res, publicNavidromeStatus({ ok: true }));
+    return;
+  }
+
+  if (pn === '/api/navidrome/search') {
+    try {
+      const kw = url.searchParams.get('keywords') || '';
+      const limit = Math.max(4, Math.min(30, parseInt(url.searchParams.get('limit') || '18', 10) || 18));
+      const songs = publicNavidromeStatus().configured ? await handleNavidromeSearch(kw, limit) : [];
+      sendJSON(res, { provider: 'navidrome', configured: publicNavidromeStatus().configured, songs });
+    } catch (err) {
+      console.error('[NavidromeSearch]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, songs: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/playlists') {
+    try {
+      const playlists = publicNavidromeStatus().configured ? await handleNavidromePlaylists() : [];
+      sendJSON(res, { provider: 'navidrome', configured: publicNavidromeStatus().configured, playlists });
+    } catch (err) {
+      console.error('[NavidromePlaylists]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, playlists: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/playlist/tracks') {
+    try {
+      const id = url.searchParams.get('id') || '';
+      const limit = Math.max(20, Math.min(500, parseInt(url.searchParams.get('limit') || '300', 10) || 300));
+      if (!id) { sendJSON(res, { provider: 'navidrome', error: 'Missing playlist id', tracks: [] }, 400); return; }
+      sendJSON(res, { provider: 'navidrome', ...(await handleNavidromePlaylistTracks(id, limit)) });
+    } catch (err) {
+      console.error('[NavidromePlaylistTracks]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, tracks: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/artist/detail') {
+    try {
+      const id = url.searchParams.get('id') || '';
+      const name = url.searchParams.get('name') || '';
+      const limit = Math.max(10, Math.min(120, parseInt(url.searchParams.get('limit') || '50', 10) || 50));
+      if (!id && !name) { sendJSON(res, { provider: 'navidrome', error: 'Missing artist', songs: [], albums: [] }, 400); return; }
+      sendJSON(res, { provider: 'navidrome', ...(await handleNavidromeArtistDetail(id, name, limit)) });
+    } catch (err) {
+      console.error('[NavidromeArtistDetail]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, songs: [], albums: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/artist/songs') {
+    try {
+      const id = url.searchParams.get('id') || '';
+      const name = url.searchParams.get('name') || '';
+      const mode = url.searchParams.get('mode') || 'top';
+      const limit = Math.max(10, Math.min(120, parseInt(url.searchParams.get('limit') || '50', 10) || 50));
+      if (!id && !name) { sendJSON(res, { provider: 'navidrome', error: 'Missing artist', songs: [] }, 400); return; }
+      sendJSON(res, { provider: 'navidrome', ...(await handleNavidromeArtistSongs(id, name, mode, limit)) });
+    } catch (err) {
+      console.error('[NavidromeArtistSongs]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, songs: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/star') {
+    try {
+      const id = url.searchParams.get('id') || '';
+      const starred = url.searchParams.get('starred') !== 'false' && url.searchParams.get('like') !== 'false';
+      sendJSON(res, await handleNavidromeStar(id, starred));
+    } catch (err) {
+      console.error('[NavidromeStar]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, starred: false }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/song/url') {
+    try {
+      sendJSON(res, await handleNavidromeSongUrl(url.searchParams.get('id') || ''));
+    } catch (err) {
+      console.error('[NavidromeSongUrl]', err);
+      sendJSON(res, { provider: 'navidrome', url: '', playable: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/lyric') {
+    try {
+      sendJSON(res, await handleNavidromeLyric(url.searchParams.get('id') || ''));
+    } catch (err) {
+      console.error('[NavidromeLyric]', err);
+      sendJSON(res, { provider: 'navidrome', error: err.message, lyric: '' }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/navidrome/song/cover') {
+    await proxyExternalImageOrNavidrome(res, req, {
+      id: url.searchParams.get('id') || '',
+      coverId: url.searchParams.get('coverId') || url.searchParams.get('id') || '',
+      title: url.searchParams.get('title') || '',
+      artist: url.searchParams.get('artist') || '',
+      album: url.searchParams.get('album') || '',
+      duration: Number(url.searchParams.get('duration') || 0) || 0,
+    });
+    return;
+  }
+
+  if (pn === '/api/navidrome/cover') {
+    await proxyNavidromeMedia(res, 'getCoverArt.view', url.searchParams.get('id') || '', 'image/jpeg', 'public, max-age=86400', req);
+    return;
+  }
+
+  if (pn === '/api/navidrome/audio') {
+    await proxyNavidromeMedia(res, 'stream.view', url.searchParams.get('id') || '', 'audio/mpeg', 'no-store', req);
+    return;
+  }
+
+  if (pn === '/api/navidrome/download') {
+    await proxyNavidromeMedia(res, 'download.view', url.searchParams.get('id') || '', 'application/octet-stream', 'no-store', req);
     return;
   }
 
