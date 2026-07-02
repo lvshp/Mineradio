@@ -85,6 +85,16 @@ jobs:
         shell: bash
         run: |
           set +e
+          if [ "${MACOS_SIGNING_ENABLED}" = "true" ]; then
+            export CSC_LINK="${SIGNING_CSC_LINK}"
+            export CSC_KEY_PASSWORD="${SIGNING_CSC_KEY_PASSWORD}"
+            export APPLE_ID="${SIGNING_APPLE_ID}"
+            export APPLE_APP_SPECIFIC_PASSWORD="${SIGNING_APPLE_APP_SPECIFIC_PASSWORD}"
+            export APPLE_TEAM_ID="${SIGNING_APPLE_TEAM_ID}"
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           npm run "${{ matrix.platform.build_script }}" 2>&1 | tee macos-build.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
@@ -95,12 +105,11 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MACOS_SIGNING_ENABLED == 'true' && 'true' || 'false' }}
+          SIGNING_CSC_LINK: ${{ secrets.CSC_LINK }}
+          SIGNING_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SIGNING_APPLE_ID: ${{ secrets.APPLE_ID }}
+          SIGNING_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SIGNING_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Generate checksums
         shell: bash
