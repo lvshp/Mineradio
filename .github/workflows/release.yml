@@ -30,7 +30,7 @@ jobs:
             artifact_name: mineradio-windows-dist
             checksum_file: SHA256SUMS-windows.txt
           - name: macOS
-            os: macos-latest
+            os: macos-15
             build_script: build:mac
             artifact_name: mineradio-macos-dist
             checksum_file: SHA256SUMS-macos.txt
