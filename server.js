@@ -279,6 +279,13 @@ function writeMediaCacheJson(namespace, key, value) {
     console.warn('[MediaCache] json write failed:', e.message);
   }
 }
+function hasLyricPayload(value) {
+  return !!(value && (
+    (typeof value.lyric === 'string' && value.lyric.trim()) ||
+    (typeof value.yrc === 'string' && value.yrc.trim()) ||
+    (typeof value.tlyric === 'string' && value.tlyric.trim())
+  ));
+}
 function readMediaCacheImage(namespace, key) {
   try {
     const file = mediaCacheImagePath(namespace, key);
@@ -2536,9 +2543,9 @@ async function fetchLrclibLyrics(meta) {
   const cacheKey = lrclibCacheKey(meta);
   if (lrclibCache.has(cacheKey)) return lrclibCache.get(cacheKey);
   const diskCached = readMediaCacheJson('lrclib-lyrics', cacheKey);
-  if (diskCached && Object.prototype.hasOwnProperty.call(diskCached, 'value')) {
-    lrclibCache.set(cacheKey, diskCached.value || null);
-    return diskCached.value || null;
+  if (diskCached && hasLyricPayload(diskCached.value)) {
+    lrclibCache.set(cacheKey, diskCached.value);
+    return diskCached.value;
   }
   const headers = { 'User-Agent': 'Mineradio/1.1.1 (https://github.com/XxHuberrr/Mineradio)' };
   function buildUrl(path, params) {
@@ -2588,14 +2595,14 @@ async function fetchLrclibLyrics(meta) {
     trackId: picked.id || '',
   } : null;
   lrclibCache.set(cacheKey, result);
-  writeMediaCacheJson('lrclib-lyrics', cacheKey, result || null);
+  if (result && result.lyric) writeMediaCacheJson('lrclib-lyrics', cacheKey, result);
   return result;
 }
 async function handleNavidromeLyric(id) {
   id = String(id || '').trim();
   if (!id) return { provider: 'navidrome', lyric: '', error: 'MISSING_ID' };
   const cached = readMediaCacheJson('navidrome-lyrics', id);
-  if (cached && cached.value) return cached.value;
+  if (cached && hasLyricPayload(cached.value)) return cached.value;
   function structuredLyricsText(payload) {
     const root = payload && (payload.lyricsList || payload.lyrics || payload);
     const structured = root && (root.structuredLyrics || root.syncedLyrics || root.lyrics || root);
@@ -2691,7 +2698,6 @@ async function handleNavidromeLyric(id) {
     }
   }
   const empty = { provider: 'navidrome', lyric: '', source: 'navidrome-empty' };
-  writeMediaCacheJson('navidrome-lyrics', id, empty);
   return empty;
 }
 async function proxyNavidromeMedia(res, endpoint, id, fallbackType, cacheControl, req) {
@@ -5279,7 +5285,7 @@ const server = http.createServer(async (req, res) => {
       const id = url.searchParams.get('id');
       if (!id) { sendJSON(res, { error: 'Missing song id', lyric: '' }, 400); return; }
       const cached = readMediaCacheJson('netease-lyrics', id);
-      if (cached && cached.value) {
+      if (cached && hasLyricPayload(cached.value)) {
         sendJSON(res, Object.assign({}, cached.value, { cached: true }));
         return;
       }
@@ -5305,7 +5311,7 @@ const server = http.createServer(async (req, res) => {
         yrc: (body.yrc && body.yrc.lyric) || '',
         source,
       };
-      writeMediaCacheJson('netease-lyrics', id, result);
+      if (hasLyricPayload(result)) writeMediaCacheJson('netease-lyrics', id, result);
       sendJSON(res, result);
     } catch (err) {
       console.error('[Lyric]', err);
