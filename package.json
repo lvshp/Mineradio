@@ -9,8 +9,9 @@
   "scripts": {
     "build:app": "node build/build-app-bundle.mjs",
     "start": "electron .",
-    "build:win": "electron-builder --win nsis",
-    "build:win:dir": "electron-builder --win dir"
+    "build:win": "electron-builder --win nsis --publish never",
+    "build:win:dir": "electron-builder --win dir",
+    "build:mac": "electron-builder --mac dmg zip --x64 --arm64 --publish never"
   },
   "build": {
     "appId": "com.mineradio.desktop",
@@ -46,6 +47,29 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.music",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "Mineradio-${version}-${arch}.${ext}",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "nsis": {
       "oneClick": false,
